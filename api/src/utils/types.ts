@@ -1,0 +1,71 @@
+import { Prisma } from "@prisma/client";
+import { Request } from "express";
+
+export interface AuthenticatedRequest extends Request {
+  userId?: string;
+}
+
+export interface EmmaJWTPayload {
+  id: string;
+}
+
+export interface KongDataProductDetails {
+  serviceResponseBody: object | null;
+  routeResponseBody: object | null;
+}
+
+export type DataProductWithKong = Prisma.DataProductGetPayload<{
+  select: {
+    id: true;
+    name: true;
+    accessURL: true;
+    kongServiceID: true;
+    price: true;
+    pricingMode: true;
+    currency: true;
+    paymentInterval: true;
+    organisationID: true;
+    organisation: {
+      select: {
+        id: true;
+        name: true;
+        logoUrl: true;
+        shortName: true;
+      };
+    };
+    users: { select: { id: true } };
+  };
+}> & {
+  kongDetails: KongDataProductDetails | null;
+};
+
+export type Organisation = Prisma.OrganisationGetPayload<{
+  select: { id: true; logoUrl: true; name: true };
+}>;
+
+export type DataProductWithOrganization = Prisma.DataProductGetPayload<{
+  select: {
+    id: true;
+    name: true;
+    description: true;
+    price: true;
+    organisationID: true;
+    organisation: {
+      select: {
+        name: true;
+        logoUrl: true;
+      };
+    };
+  };
+}>;
+
+// Define type for the mapped response
+export type MappedDataProduct = {
+  objectID: string;
+  dataproduct: string;
+  description: string | null;
+  price: number;
+  organisation: string;
+  organisationLogoUrl: string;
+  organisationID: string;
+};

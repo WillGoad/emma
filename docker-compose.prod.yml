@@ -1,0 +1,34 @@
+version: '3.8'
+
+services:
+  nginx:
+    build: ./nginx
+    ports:
+      - "80:80"
+    depends_on:
+      - api
+      - frontend
+
+  api:
+    build:
+      context: ./api
+    environment:
+      - NODE_ENV=production
+      - DATABASE_URL=${DATABASE_URL}
+      - KONG_ADMIN_URL=${KONG_ADMIN_URL}
+      - KONG_PUBLIC_DNS=${KONG_PUBLIC_DNS}
+      - KONG_API_KEY=${KONG_API_KEY}
+      - JWT_SECRET=${JWT_SECRET}
+      - SENDGRID_API_KEY=${SENDGRID_API_KEY}
+      - FRONTEND_URL=http://localhost
+    command: sh -c "npx prisma generate"
+    working_dir: /app
+    
+
+  frontend:
+    build:
+      context: ./frontend
+      args:
+        - NEXT_PUBLIC_API_URL=http://api:3001 # Use internal Docker network address
+    environment:
+      - NEXT_PUBLIC_API_URL=/api

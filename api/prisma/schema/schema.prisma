@@ -1,0 +1,125 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+// Looking for ways to speed up your queries, or scale easily with your serverless or edge functions?
+// Try Prisma Accelerate: https://pris.ly/cli/accelerate-init
+
+generator client {
+  provider        = "prisma-client-js"
+  previewFeatures = ["prismaSchemaFolder"]
+  binaryTargets   = ["native", "debian-openssl-3.0.x"]
+}
+
+datasource db {
+  provider = "mongodb"
+  url      = env("DATABASE_URL")
+}
+
+model ISO10383 {
+  id String @id @default(auto()) @map("_id") @db.ObjectId
+
+  // ISO10383 Fields
+  mic                String               @unique
+  operatingMic       String
+  oprtSgmt           OPRTSGMT
+  marketName         String
+  legalEntityName    String?
+  lei                String?
+  marketCategoryCode MarketCategory
+  acronym            String?
+  isoCountryCode     ISO31661CountryCode?
+  city               String?
+  website            String?
+  status             ISO10383Status
+  creationDate       String
+  lastUpdateDate     String
+  lastValidationDate String?
+  expiryDate         String?
+  comments           String?
+}
+
+model Organisation {
+  id           String        @id @default(auto()) @map("_id") @db.ObjectId
+  logoUrl      String?
+  name         String
+  shortName    String
+  description  String?
+  website      String?
+  creationDate DateTime      @default(now())
+  dataProducts DataProduct[]
+  createdAt    DateTime      @default(now())
+  updatedAt    DateTime      @updatedAt
+}
+
+enum PriceStructureMode {
+  FREE
+  SUBSCRIPTION
+  PAY_PER_REQUEST
+  PAY_PER_GB
+}
+
+enum PayInterval {
+  DAILY
+  WEEKLY
+  MONTHLY
+  YEARLY
+}
+
+model DataProduct {
+  id String @id @default(auto()) @map("_id") @db.ObjectId
+
+  name            String
+  description     String?
+  status          DataProductStatus
+  accessURL       String
+  upstreamURL     String
+  kongServiceID   String?
+  organisationID  String             @db.ObjectId
+  organisation    Organisation       @relation(fields: [organisationID], references: [id])
+  price           Float?
+  currency        String?
+  pricingMode     PriceStructureMode
+  paymentInterval PayInterval?
+  Charge          Charge[]
+  userIDs         String[]           @db.ObjectId
+  users           User[]             @relation(fields: [userIDs], references: [id])
+  createdAt       DateTime           @default(now())
+  updatedAt       DateTime           @updatedAt
+}
+
+model User {
+  id             String        @id @default(auto()) @map("_id") @db.ObjectId
+  userName       String
+  email          String        @unique
+  role           UserRole
+  organisationID String?       @db.ObjectId
+  dataProductIDs String[]      @db.ObjectId
+  subscriptions  DataProduct[] @relation(fields: [dataProductIDs], references: [id])
+  charges        Charge[]
+  verification   Verification?
+  emailVerified  Boolean       @default(false)
+  createdAt      DateTime      @default(now())
+  updatedAt      DateTime      @updatedAt
+}
+
+model Verification {
+  id       String   @id @default(auto()) @map("_id") @db.ObjectId
+  code     String
+  expiry   DateTime
+  sentTime DateTime
+  userId   String   @unique @db.ObjectId
+  user     User     @relation(fields: [userId], references: [id])
+}
+
+model Charge {
+  id                 String      @id @default(auto()) @map("_id") @db.ObjectId
+  dataProductId      String      @db.ObjectId
+  originalChargeDate DateTime
+  lastChargeDate     DateTime
+  chargeAmount       Float
+  userId             String      @db.ObjectId
+  user               User        @relation(fields: [userId], references: [id])
+  dataProduct        DataProduct @relation(fields: [dataProductId], references: [id])
+  createdAt          DateTime    @default(now())
+  updatedAt          DateTime    @updatedAt
+}
