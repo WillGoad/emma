@@ -1,6 +1,7 @@
 import { Label } from "@/components/ui/label";
 import { Separator } from "@/components/ui/separator";
 import { FilterType } from "@/lib/types";
+import Image from "next/image";
 
 type FilterProps = {
   activeFilter: string;
@@ -21,7 +22,13 @@ const Filter = ({ filter, onFilterChange, activeFilter }: FilterProps) => {
         {filter.icon ? (
           <span className="text-2xl">{filter.icon}</span>
         ) : filter.image ? (
-          <img src={filter.image} alt={filter.label} className="w-6 h-6 m-1" />
+          <Image
+            width={20}
+            height={20}
+            src={filter.image}
+            alt={filter.label}
+            className="w-6 h-6 m-1"
+          />
         ) : null}
         <Label className="text-xs text-center">{filter.label}</Label>
       </div>

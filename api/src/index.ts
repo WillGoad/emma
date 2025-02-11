@@ -12,19 +12,7 @@ export const prisma = new PrismaClient();
 
 const app = express();
 
-const corsOptions = {
-  origin: [
-    process.env.FRONTEND_URL, // Production URL
-    'http://localhost:3000',  // Local development
-    'http://frontend:3000'    // Docker internal
-  ].filter((url): url is string => url !== undefined),
-  methods: ['GET', 'POST', 'PUT', 'DELETE'],
-  allowedHeaders: ['Content-Type', 'Authorization'],
-  credentials: true
-};
-
-app.use(cors(corsOptions));
-app.options('*', cors(corsOptions));
+app.use(cors());
 
 app.use(express.json());
 
