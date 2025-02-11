@@ -16,8 +16,8 @@ export const DataExplorer = () => {
     if (filter === "all") return true;
     if (filter === "free") return product.pricingMode === "FREE";
     if (filter === "paid") return product.pricingMode !== "FREE";
-    const organizationId = organizationIdMap[filter];
-    if (organizationId) return product.organisationID === organizationId;
+    const organizationsContainFilter = organisations.map(org => org.id).includes(filter);
+    if (organizationsContainFilter) return product.organisationID === filter;
     return true;
   };
 
