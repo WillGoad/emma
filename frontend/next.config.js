@@ -1,7 +1,7 @@
 // next.config.js
 module.exports = {
   images: {
-    domains: ['logo.clearbit.com'], // Add the required domain here
+    domains: ['logo.clearbit.com', 'www.coinjar.com', 'www.cryptomkt.com'], // Add the required domain here
   },
     async rewrites() {
       return process.env.NODE_ENV === 'development' ? [
