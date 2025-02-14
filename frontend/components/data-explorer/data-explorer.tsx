@@ -6,11 +6,14 @@ import { Separator } from "../ui/separator";
 import FilterBar from "./filter-bar/filter-bar";
 import { FiltersArray } from "@/lib/constants";
 import { useUserData } from "../context/UserContext";
+import SubscribeSheet from "./subscribe-sheet/subscribe-sheet";
+
 
 export const DataExplorer = () => {
   const { user, dataProducts, organisations = [] } = useUserData();
 
   const [filter, setFilter] = useState<string>("all");
+  const [open, setOpen] = useState<boolean>(false);
 
   const filterDataProducts = (product: DataProduct) => {
     if (filter === "all") return true;
@@ -43,6 +46,7 @@ export const DataExplorer = () => {
         onFilterChange={setFilter}
         activeFilter={filter}
       />
+      <SubscribeSheet open={open} setOpen={setOpen} />
       <div className="h-fit w-full mt-4 mb-12 px-10">
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-8">
           {dataProducts &&

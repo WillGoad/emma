@@ -1,7 +1,6 @@
 import { type ClassValue, clsx } from "clsx";
 import { twMerge } from "tailwind-merge";
 import { setCookie, deleteCookie } from "cookies-next";
-import { useToast } from "@/components/hooks/use-toast";
 
 import { USER_TOKEN } from "./constants";
 
