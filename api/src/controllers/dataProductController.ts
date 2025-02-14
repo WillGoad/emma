@@ -1,10 +1,22 @@
 import { Request, Response } from "express";
 import { prisma } from "..";
 import dotenv from "dotenv";
-import { AuthenticatedRequest, DataProductWithOrganization, MappedDataProduct } from "../utils/types";
-import { DataProductStatus } from "@prisma/client";
-import axios from "axios";
-import { replaceSpacesWithUnderscores } from "../utils/helpers";
+import {
+  AuthenticatedRequest,
+  DataProductWithOrganization,
+  MappedDataProduct,
+} from "../utils/types";
+import {
+  DataProductStatus,
+  PriceStructureMode,
+  UserRole,
+} from "@prisma/client";
+import {
+  createKongServiceForProduct,
+  deleteKongServiceByID,
+  upsertKongService,
+} from "../utils/kong";
+import { isValidCurrency } from "../utils/validation";
 
 dotenv.config();
 
@@ -53,30 +65,52 @@ export const getDataProducts = async (
     res.status(200).json(mappedDataProducts);
   } catch (error) {
     console.error("Error fetching data products:", error);
-    res.status(500).json({ 
+    res.status(500).json({
       message: "Server error",
-      error: error instanceof Error ? error.message : "Unknown error"
+      error: error instanceof Error ? error.message : "Unknown error",
     });
   }
 };
 
 export const createDataProduct = async (
   req: AuthenticatedRequest,
-  res: Response,
+  res: Response
 ): Promise<void> => {
-  if (req.userId === undefined) {
-    res.status(401).json({ message: "Unauthorized" });
-    return;
-  }
-
   try {
-    //check if user is admin
+    // Authorization check
+    if (!req.userId) {
+      res.status(401).json({ message: "Unauthorized" });
+      return;
+    }
+
+    // Permission validation
     const currentUser = await prisma.user.findUnique({
       where: { id: req.userId },
+      select: { role: true },
     });
 
-    if (currentUser?.role !== "ADMIN") {
-      throw new Error("Lacks Permissions");
+    if (currentUser?.role !== UserRole.ADMIN) {
+      res.status(403).json({ message: "Insufficient permissions" });
+      return;
+    }
+
+    // Input validation
+    const requiredFields = [
+      "name",
+      "description",
+      "status",
+      "organisationID",
+      "accessURL",
+      "upstreamURL",
+      "pricingMode",
+    ];
+
+    const missingFields = requiredFields.filter((field) => !req.body[field]);
+    if (missingFields.length > 0) {
+      res.status(400).json({
+        message: `Missing required fields: ${missingFields.join(", ")}`,
+      });
+      return;
     }
 
     const {
@@ -87,301 +121,237 @@ export const createDataProduct = async (
       accessURL,
       upstreamURL,
       pricingMode,
-      price,
+      price: priceString,
       currency,
       paymentInterval,
     } = req.body;
 
-    if (!name) {
-      throw new Error("Missing required field: name");
-    }
-    if (!description) {
-      throw new Error("Missing required field: description");
-    }
-    if (!status) {
-      throw new Error("Missing required field: status");
-    }
-    if (!organisationID) {
-      throw new Error("Missing required field: organisationID");
-    }
-    if (!accessURL) {
-      throw new Error("Missing required field: url");
-    }
-    if (!upstreamURL) {
-      throw new Error("Missing required field: url");
-    }
-    if (!pricingMode) {
-      throw new Error("Missing required field: pricingMode");
-    }
-    if (pricingMode !== "FREE") {
-      if (price === undefined) {
-        throw new Error("Missing required field: price");
-      }
-      if (!currency) {
-        throw new Error("Missing required field: currency");
-      }
-    }
-    if (pricingMode === "SUBSCRIPTION") {
-      if (!paymentInterval) {
-        throw new Error("Missing required field: paymentInterval");
-      }
-    }
+    // Validate enum values
     if (!Object.values(DataProductStatus).includes(status)) {
-      throw new Error("Invalid status value");
+      res.status(400).json({ message: "Invalid status value" });
+      return;
     }
 
-    // Create the data product in MongoDB
+    if (!Object.values(PriceStructureMode).includes(pricingMode)) {
+      res.status(400).json({ message: "Invalid pricing mode" });
+      return;
+    }
+
+    // Convert price to number
+    const price = parseFloat(priceString);
+
+    // Validate pricing structure
+    if (pricingMode !== PriceStructureMode.FREE) {
+      if (isNaN(price) || price <= 0) {
+        res.status(400).json({ message: "Invalid price value" });
+        return;
+      }
+      if (!currency || !isValidCurrency(currency)) {
+        // Add currency validation
+        res.status(400).json({ message: "Invalid currency" });
+        return;
+      }
+    }
+
+    if (pricingMode === PriceStructureMode.SUBSCRIPTION && !paymentInterval) {
+      res
+        .status(400)
+        .json({ message: "Payment interval required for subscriptions" });
+      return;
+    }
+
+    // Validate organization exists
+    const organizationExists = await prisma.organisation.findUnique({
+      where: { id: organisationID },
+      select: { id: true },
+    });
+
+    if (!organizationExists) {
+      res.status(400).json({ message: "Organization not found" });
+      return;
+    }
+
     const newProduct = await prisma.dataProduct.create({
       data: {
         name,
         description,
-        status: DataProductStatus[status as keyof typeof DataProductStatus],
+        status: status as DataProductStatus,
         accessURL,
         upstreamURL,
         organisationID,
-        Charge: {
-          create: [],
-        },
         pricingMode,
-        ...(pricingMode === "SUBSCRIPTION" && {
-          priceStructureInterval: paymentInterval,
+        ...(pricingMode !== PriceStructureMode.FREE && {
+          price,
+          currency: currency.toUpperCase(),
         }),
-        ...(pricingMode !== "FREE" && { price, currency }),
+        ...(pricingMode === PriceStructureMode.SUBSCRIPTION && {
+          paymentInterval,
+        }),
       },
-      include: {
-        organisation: true,
-      },
+      include: { organisation: true },
     });
 
-    await insertKongService(newProduct);
+    // Kong integration with error handling
+    let kongServiceId: string | undefined;
+    try {
+      const result = await createKongServiceForProduct({ product: newProduct });
+      kongServiceId = result.service.id;
+      await prisma.dataProduct.update({
+        where: { id: newProduct.id },
+        data: { kongServiceID: result.service.id },
+      });
+    } catch (kongError) {
+      // Check if the Kong service was created
+      if (kongServiceId) {
+        try {
+          // Delete the Kong service if it exists
+          await deleteKongServiceByID(kongServiceId);
+        } catch (deleteError) {
+          console.error("Failed to cleanup Kong service:", deleteError);
+          // Optionally re-throw or handle as needed
+        }
+      }
+
+      // Delete the product from the database
+      await prisma.dataProduct.delete({
+        where: { id: newProduct.id },
+      });
+
+      // Propagate the error
+      throw new Error("Failed to configure API gateway");
+    }
 
     // Return the created data product as a JSON response
     res.status(201).json({ message: "Data product created successfully" });
   } catch (error) {
-    console.error(error);
-    res.status(500).json({ message: `Server error` });
+    console.error("Data product creation error:", error);
+    const message = error instanceof Error ? error.message : "Creation failed";
+    res.status(500).json({ message });
   }
 };
 
 export const updateDataProduct = async (
   req: AuthenticatedRequest,
-  res: Response,
+  res: Response
 ): Promise<void> => {
-  if (req.userId === undefined) {
-    res.status(401).json({ message: "Unauthorized" });
-    return;
-  }
-
   try {
-    //check if user is admin
+    // Authorization check
+    if (!req.userId) {
+      res.status(401).json({ message: "Unauthorized" });
+      return;
+    }
+
+    // Permission validation
     const currentUser = await prisma.user.findUnique({
       where: { id: req.userId },
+      select: { role: true },
     });
 
-    if (currentUser?.role !== "ADMIN") {
-      throw new Error("Lacks Permissions");
+    if (currentUser?.role !== UserRole.ADMIN) {
+      res.status(403).json({ message: "Insufficient permissions" });
+      return;
     }
 
+    // Input validation
     const { id, ...updates } = req.body;
 
-    // Validate input
     if (!id) {
-      throw new Error("Product ID is required.");
+      res.status(400).json({ message: "Product ID is required" });
+      return;
     }
 
+    // Validate existing product
     const existingProduct = await prisma.dataProduct.findUnique({
       where: { id },
     });
+
     if (!existingProduct) {
-      throw new Error("Product not found.");
+      res.status(404).json({ message: "Product not found" });
+      return;
     }
 
-    // Handle pricingMode changes
-    if (updates.pricingMode === "FREE") {
-      delete updates.price;
-      delete updates.currency;
-      delete updates.paymentInterval;
-    } else if (updates.pricingMode !== "SUBSCRIPTION") {
-      delete updates.paymentInterval;
+    // Validate enum values if provided
+    if (updates.status && !Object.values(DataProductStatus).includes(updates.status)) {
+      res.status(400).json({ message: "Invalid status value" });
+      return;
     }
 
-    if (updates.price) {
-      updates.price = Number(updates.price);
+    if (updates.pricingMode && !Object.values(PriceStructureMode).includes(updates.pricingMode)) {
+      res.status(400).json({ message: "Invalid pricing mode" });
+      return;
     }
 
-    // Update the data product in MongoDB
-    const updatedProduct = await prisma.dataProduct.update({
-      where: { id },
-      data: {
-        ...updates,
-      },
-      include: {
-        organisation: true,
-      },
-    });
+    // Validate organization if being updated
+    if (updates.organisationID) {
+      const organizationExists = await prisma.organisation.findUnique({
+        where: { id: updates.organisationID },
+        select: { id: true },
+      });
 
-    await upsertKongService(updatedProduct);
+      if (!organizationExists) {
+        res.status(400).json({ message: "Organization not found" });
+        return;
+      }
+    }
 
-    res.status(201).json({ message: "Data product updated successfully" });
+    // Handle pricing changes
+    if (updates.pricingMode) {
+      if (updates.pricingMode === PriceStructureMode.FREE) {
+        updates.price = null;
+        updates.currency = null;
+        updates.paymentInterval = null;
+      } else {
+        // Validate pricing structure for non-free modes
+        if (updates.pricingMode === PriceStructureMode.SUBSCRIPTION && !updates.paymentInterval) {
+          res.status(400).json({ message: "Payment interval required for subscriptions" });
+          return;
+        }
+
+        if (updates.price) {
+          const price = parseFloat(updates.price);
+          if (isNaN(price) || price <= 0) {
+            res.status(400).json({ message: "Invalid price value" });
+            return;
+          }
+          updates.price = price;
+        }
+
+        if (updates.currency && !isValidCurrency(updates.currency)) {
+          res.status(400).json({ message: "Invalid currency" });
+          return;
+        }
+      }
+    }
+
+    // Update the data product
+    let updatedProduct: DataProductWithOrganization;
+
+    // Kong integration with error handling
+    try {
+      updatedProduct = await prisma.dataProduct.update({
+        where: { id },
+        data: updates,
+        include: { organisation: true },
+      });
+      await upsertKongService(updatedProduct);
+    } catch (kongError) {
+      console.error("Kong service update failed:", kongError);
+      // Revert the product update if Kong fails
+      await prisma.dataProduct.update({
+        where: { id },
+        data: existingProduct,
+      });
+      
+      throw new Error("Failed to update API gateway configuration");
+    }
+
+    res.status(200).json({ message: "Data product updated successfully", data: updatedProduct });
   } catch (error) {
-    console.error(error);
-    res.status(500).json({ message: `Server error` });
+    console.error("Data product update error:", error);
+    const message = error instanceof Error ? error.message : "Update failed";
+    const statusCode = message.includes("permission") ? 403 
+                     : message.includes("not found") ? 404 
+                     : 500;
+    res.status(statusCode).json({ message });
   }
-};
-
-const upsertKongService = async (updatedProduct: any) => {
-  let kongServiceId = updatedProduct.kongServiceID;
-  const kongServiceName = replaceSpacesWithUnderscores(
-    `${updatedProduct.name}_${updatedProduct.organisation.shortName}`,
-  );
-  const isKongEnabled = updatedProduct.status === "LIVE";
-
-  let kongService;
-
-  if (kongServiceId) {
-    // Check if Kong service exists
-    kongService = await axios
-      .get(`${process.env.KONG_ADMIN_URL}/services/${kongServiceId}`, {
-        headers: { apikey: process.env.KONG_API_KEY as string },
-      })
-      .then((res) => res.data)
-      .catch(() => null);
-  }
-
-  if (!kongService) {
-    const newKongService = await axios.post(
-      `${process.env.KONG_ADMIN_URL}/services`,
-      {
-        name: kongServiceName,
-        url: updatedProduct.upstreamURL,
-        enabled: isKongEnabled,
-      },
-      {
-        headers: {
-          "Content-Type": "application/json",
-          apikey: process.env.KONG_API_KEY as string,
-        },
-      },
-    );
-
-    await prisma.dataProduct.update({
-      where: { id: updatedProduct.id },
-      data: {
-        kongServiceID: newKongService.data.id,
-      },
-    });
-    kongServiceId = newKongService.data.id;
-  }
-
-  // Check if route exists for service
-
-  let kongServiceRoute = await axios
-    .get(`${process.env.KONG_ADMIN_URL}/services/${kongServiceId}/routes`, {
-      headers: { apikey: process.env.KONG_API_KEY as string },
-    })
-    .then((res) => res.data)
-    .catch(() => null);
-
-  if (kongServiceRoute?.data.length === 0) {
-    await axios.post(
-      `${process.env.KONG_ADMIN_URL}/routes`,
-      {
-        paths: [
-          `/${updatedProduct.organisation.shortName}/${updatedProduct.accessURL}`,
-        ],
-        service: { id: kongServiceId },
-      },
-      {
-        headers: {
-          "Content-Type": "application/json",
-          apikey: process.env.KONG_API_KEY as string,
-        },
-      },
-    );
-  }
-
-  // Update existing Kong service
-  await axios.patch(
-    `${process.env.KONG_ADMIN_URL}/services/${kongServiceId}`,
-    {
-      name: kongServiceName,
-      url: updatedProduct.upstreamURL,
-      enabled: isKongEnabled,
-    },
-    {
-      headers: {
-        "Content-Type": "application/json",
-        apikey: process.env.KONG_API_KEY as string,
-      },
-    },
-  );
-
-  if (!kongServiceRoute) {
-    kongServiceRoute = await axios
-      .get(`${process.env.KONG_ADMIN_URL}/services/${kongServiceId}/routes`, {
-        headers: { apikey: process.env.KONG_API_KEY as string },
-      })
-      .then((res) => res.data)
-      .catch(() => null);
-  }
-
-  // Update route
-  await axios.patch(
-    `${process.env.KONG_ADMIN_URL}/services/${kongServiceId}/routes/${kongServiceRoute.data[0].id}`,
-    {
-      paths: [
-        `/${updatedProduct.organisation.shortName}/${updatedProduct.accessURL}`,
-      ],
-    },
-    {
-      headers: {
-        "Content-Type": "application/json",
-        apikey: process.env.KONG_API_KEY as string,
-      },
-    },
-  );
-};
-
-const insertKongService = async (updatedProduct: any) => {
-  const kongServiceName = replaceSpacesWithUnderscores(
-    `${updatedProduct.name}_${updatedProduct.organisation.shortName}`,
-  );
-  const isKongEnabled = updatedProduct.status === "LIVE";
-  const newKongService = await axios.post(
-    `${process.env.KONG_ADMIN_URL}/services`,
-    {
-      name: kongServiceName,
-      url: updatedProduct.upstreamURL,
-      enabled: isKongEnabled,
-    },
-    {
-      headers: {
-        "Content-Type": "application/json",
-        apikey: process.env.KONG_API_KEY as string,
-      },
-    },
-  );
-
-  await prisma.dataProduct.update({
-    where: { id: updatedProduct.id },
-    data: {
-      kongServiceID: newKongService.data.id,
-    },
-  });
-
-  await axios.post(
-    `${process.env.KONG_ADMIN_URL}/routes`,
-    {
-      paths: [
-        `/${updatedProduct.organisation.shortName}/${updatedProduct.accessURL}`,
-      ],
-      service: { id: newKongService.data.id },
-    },
-    {
-      headers: {
-        "Content-Type": "application/json",
-        apikey: process.env.KONG_API_KEY as string,
-      },
-    },
-  );
 };

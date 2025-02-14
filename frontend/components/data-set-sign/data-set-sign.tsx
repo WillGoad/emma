@@ -88,9 +88,6 @@ const DataSetCard = ({ product, isSubscribed }: DataSetCardProps) => {
         <CardTitle className="text-2xl">
           <Link href={`/data-product/${product.id}`}>{product.name}</Link>
         </CardTitle>
-        <CardDescription className="mt-2">
-          {product.description}
-        </CardDescription>
         <p className="text-sm text-muted-foreground font-light">
           <Link
             href={`/organisation/${product.organisationID}`}
@@ -107,6 +104,9 @@ const DataSetCard = ({ product, isSubscribed }: DataSetCardProps) => {
             {product.organisation.name}
           </Link>
         </p>
+        <CardDescription className="mt-2">
+          {product.description}
+        </CardDescription>
       </CardHeader>
       <CardContent>
         {isSubscribedUI && keyAuth && (

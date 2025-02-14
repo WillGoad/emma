@@ -6,237 +6,180 @@ import { AuthenticatedRequest } from "../utils/types";
 import axios from "axios";
 import dotenv from "dotenv";
 import { DataProduct, UserRole } from "@prisma/client";
+import { addUserToProductACL, removeUserFromProductACL } from "../utils/kong";
 
 dotenv.config();
 
 export const subscribeUserToDataProduct = async (
   req: AuthenticatedRequest,
-  res: Response,
+  res: Response
 ): Promise<void> => {
-  if (req.userId === undefined) {
+  if (!req.userId) {
     res.status(401).json({ message: "Unauthorized" });
     return;
   }
 
   try {
-    const userId = req.userId; // Extract user.sub from validated JWT
-    const { productId } = req.body; // Extract product data from request body
-    const user = await prisma.user.findUnique({
-      where: { id: userId },
-      include: { charges: true, subscriptions: true }, // Include charges in the user object
-    });
+    const userId = req.userId;
+    const { productId } = req.body;
+
+    // Validate productId format
+    if (!/^[0-9a-fA-F]{24}$/.test(productId)) {
+      res.status(400).json({ message: "Invalid product ID format" });
+      return;
+    }
+
+    // Use transaction for atomic operations
+    const [user, dataProduct] = await prisma.$transaction([
+      prisma.user.findUnique({
+        where: { id: userId },
+        include: { subscriptions: { select: { id: true } } },
+      }),
+      prisma.dataProduct.findUnique({
+        where: { id: productId },
+      }),
+    ]);
 
     if (!user) {
       res.status(404).json({ message: "User not found" });
       return;
     }
 
-    // Check if the productId is already in the subscriptions array
-    if (
-      user.subscriptions
-        .map((subscription: DataProduct) => subscription.id)
-        .includes(productId)
-    ) {
-      res.status(200).json({ message: "User already subscribed", user });
-      return;
-    }
-
-    // Fetch the data product to get the monthlyAmount
-    const dataProduct = await prisma.dataProduct.findUnique({
-      where: { id: productId },
-    });
-
     if (!dataProduct) {
       res.status(404).json({ message: "Data product not found" });
       return;
     }
 
-    // If the data product has a monthly amount, add a new charge
-    if (dataProduct.pricingMode !== "FREE" && dataProduct.price) {
-      const newCharge = await prisma.charge.create({
-        data: {
-          dataProductId: productId,
-          originalChargeDate: new Date(),
-          lastChargeDate: new Date(),
-          chargeAmount: dataProduct.price,
-          userId: user.id,
-        },
+    // Check existing subscription using relation
+    if (user.subscriptions.some((sub) => sub.id === productId)) {
+      res.status(409).json({ message: "Already subscribed" });
+      return;
+    }
+
+    // Validate pricing structure
+    if (
+      dataProduct.pricingMode === "SUBSCRIPTION" &&
+      (!dataProduct.price || !dataProduct.paymentInterval)
+    ) {
+      res.status(400).json({
+        message: "Subscription product requires price and payment interval",
+      });
+      return;
+    }
+
+    await prisma.$transaction(async (tx) => {
+      // Create charge if applicable
+      if (
+        dataProduct.pricingMode === "SUBSCRIPTION" &&
+        dataProduct.price &&
+        dataProduct.paymentInterval
+      ) {
+        await tx.charge.create({
+          data: {
+            interval: dataProduct.paymentInterval,
+            startTime: new Date(),
+            endTime: null,
+            amount: dataProduct.price,
+            currency: dataProduct.currency || "GBP",
+            dataProductId: productId,
+            userId: user.id,
+          },
+        });
+      }
+
+      // Update relations using connect
+      await tx.dataProduct.update({
+        where: { id: productId },
+        data: { users: { connect: { id: userId } } },
       });
 
-      // Add the new charge to the user's charges array
-      user.charges.push(newCharge);
-    }
-
-    // Add user to DataProduct's userIDs array
-    await prisma.dataProduct.update({
-      where: { id: productId },
-      data: {
-        userIDs: {
-          push: userId, // Add userId to the userIDs array
-        },
-      },
+      await tx.user.update({
+        where: { id: userId },
+        data: { subscriptions: { connect: { id: productId } } },
+      });
     });
 
-    // Update the user's subscriptions
-    const updatedUser = await prisma.user.update({
-      where: { id: userId },
-      data: {
-        dataProductIDs: {
-          push: productId, // Add the product ID to the array
-        },
-        subscriptions: {
-          connect: { id: productId }, // Connect the subscription relation
-        },
-      },
-      include: { charges: true, subscriptions: true }, // Include charges in the updated user object
-    });
+    await addUserToProductACL(userId, productId);
 
-    // Get the user's Kong id using it's custom_id which is set to it's userId
-
-    const kongAdminUrlGetConsumer = `${process.env.KONG_ADMIN_URL}/consumers?custom_id=${userId}`; // Replace with your Kong Admin API URL
-    const responseGetConsumer = await axios.get(kongAdminUrlGetConsumer, {
-      headers: {
-        apikey: process.env.KONG_API_KEY,
-      },
-    });
-
-    const kongId = responseGetConsumer.data.data[0].id;
-
-    if (!kongId) {
-      throw new Error("Kong id not found");
-    }
-
-    // Add User to ACL for this data product's route
-
-    const kongAdminUrl = `${process.env.KONG_ADMIN_URL}/consumers/${kongId}/acls`;
-    await axios.post(
-      kongAdminUrl,
-      {
-        group: `data_product_${productId}_group`,
-      },
-      {
-        headers: {
-          apikey: process.env.KONG_API_KEY,
-        },
-      },
-    );
-
-    res
-      .status(200)
-      .json({ message: "User subscribed successfully", user: updatedUser });
+    res.status(200).json({ message: "User subscribed successfully" });
   } catch (error) {
-    console.error(error);
-    res.status(500).json({ message: "Server error" });
-    return;
+    console.error("Subscription error:", error);
+    res.status(500).json({
+      message: error instanceof Error ? error.message : "Subscription failed",
+    });
   }
 };
 
 export const unsubscribeUserFromDataProduct = async (
   req: AuthenticatedRequest,
-  res: Response,
+  res: Response
 ): Promise<void> => {
-  if (req.userId === undefined) {
+  if (!req.userId) {
     res.status(401).json({ message: "Unauthorized" });
     return;
   }
 
   try {
-    const userId = req.userId; // Extract user.sub from validated JWT
-    const { productId } = req.body; // Extract product data from request body
+    const userId = req.userId;
+    const { productId } = req.body;
 
-    const user = await prisma.user.findUnique({
-      where: { id: userId },
-      include: { charges: true, subscriptions: true }, // Include charges in the user object
-    });
+    // Validate productId format
+    if (!/^[0-9a-fA-F]{24}$/.test(productId)) {
+      res.status(400).json({ message: "Invalid product ID format" });
+      return;
+    }
+
+    // Use transaction for atomic operations
+    const [user, dataProduct] = await prisma.$transaction([
+      prisma.user.findUnique({
+        where: { id: userId },
+        include: { subscriptions: { select: { id: true } } },
+      }),
+      prisma.dataProduct.findUnique({
+        where: { id: productId },
+      }),
+    ]);
 
     if (!user) {
       res.status(404).json({ message: "User not found" });
       return;
     }
 
-    // Check if the productId is in the subscriptions array
-    if (
-      !user.subscriptions
-        .map((subscription: DataProduct) => subscription.id)
-        .includes(productId)
-    ) {
-      res
-        .status(400)
-        .json({ message: "User is not subscribed to this product" });
-      return;
-    }
-
-    // Remove relevant charges related to the productId
-    await prisma.charge.deleteMany({
-      where: {
-        userId: user.id,
-        dataProductId: productId,
-      },
-    });
-
-    // Fetch the data product to get the userIDs
-    const dataProduct = await prisma.dataProduct.findUnique({
-      where: { id: productId },
-    });
-
     if (!dataProduct) {
       res.status(404).json({ message: "Data product not found" });
       return;
     }
 
-    // Filter out the productId from dataProductIDs
-    const updatedDataProductIDs = user.dataProductIDs.filter(
-      (id: string) => id !== productId,
-    );
-
-    // Remove user from DataProduct's userIDs array
-    await prisma.dataProduct.update({
-      where: { id: productId },
-      data: {
-        userIDs: {
-          set: dataProduct.userIDs.filter((id: string) => id !== userId), // Remove the userId from the array
-        },
-      },
-    });
-
-    const updatedUser = await prisma.user.update({
-      where: { id: userId },
-      data: {
-        dataProductIDs: updatedDataProductIDs, // Update the raw dataProductIDs array
-        subscriptions: {
-          disconnect: { id: productId }, // Disconnect the subscription relation
-        },
-      },
-      include: { charges: true }, // Include charges in the updated user object
-    });
-
-    // Get the user's Kong id using it's custom_id which is set to it's userId
-
-    const kongAdminUrlGetConsumer = `${process.env.KONG_ADMIN_URL}/consumers?custom_id=${userId}`; // Replace with your Kong Admin API URL
-    const responseGetConsumer = await axios.get(kongAdminUrlGetConsumer, {
-      headers: {
-        apikey: process.env.KONG_API_KEY,
-      },
-    });
-
-    const kongId = responseGetConsumer.data.data[0].id;
-
-    if (!kongId) {
-      throw new Error("Kong id not found");
+    // Check existing subscription using relation
+    if (!user.subscriptions.some((sub) => sub.id === productId)) {
+      res.status(409).json({ message: "Not subscribed to product" });
+      return;
     }
 
-    // Remove user from ACL for this data product's route
+    await prisma.$transaction(async (tx) => {
+      // Remove related charges
+      await tx.charge.updateMany({
+        where: { userId, dataProductId: productId, endTime: null },
+        data: { endTime: new Date() }
+      });
 
-    const kongAdminUrl = `${process.env.KONG_ADMIN_URL}/consumers/${kongId}/acls/data_product_${productId}_group`; // Replace with your Kong Admin API URL
-    await axios.delete(kongAdminUrl, {
-      headers: {
-        apikey: process.env.KONG_API_KEY,
-      },
+      // Update relations using disconnect
+      await tx.dataProduct.update({
+        where: { id: productId },
+        data: { users: { disconnect: { id: userId } } },
+      });
+
+      await tx.user.update({
+        where: { id: userId },
+        data: {
+          subscriptions: { disconnect: { id: productId } },
+        },
+      });
     });
 
-    res
-      .status(200)
-      .json({ message: "User unsubscribed successfully", user: updatedUser });
+    await removeUserFromProductACL(userId, productId);
+
+    res.status(200).json({ message: "User unsubscribed successfully" });
   } catch (error) {
     console.error(error);
     res.status(500).json({ message: "Server error" });
@@ -246,7 +189,7 @@ export const unsubscribeUserFromDataProduct = async (
 
 export const getUserDetails = async (
   req: AuthenticatedRequest,
-  res: Response,
+  res: Response
 ): Promise<void> => {
   if (req.userId === undefined) {
     res.status(401).json({ message: "Unauthorized" });
@@ -285,7 +228,7 @@ export const getUserDetails = async (
 
 export const createAPIKeyForUser = async (
   req: AuthenticatedRequest,
-  res: Response,
+  res: Response
 ): Promise<void> => {
   if (req.userId === undefined) {
     res.status(401).json({ message: "Unauthorized" });
@@ -331,7 +274,7 @@ export const createAPIKeyForUser = async (
         headers: {
           apikey: process.env.KONG_API_KEY,
         },
-      },
+      }
     );
 
     res.status(200).json(response.data);
@@ -344,7 +287,7 @@ export const createAPIKeyForUser = async (
 
 export const deleteAPIKeyForUser = async (
   req: AuthenticatedRequest,
-  res: Response,
+  res: Response
 ): Promise<void> => {
   if (req.userId === undefined) {
     res.status(401).json({ message: "Unauthorized" });
@@ -385,7 +328,7 @@ export const deleteAPIKeyForUser = async (
 
 export const getAPIKeysByUser = async (
   req: AuthenticatedRequest,
-  res: Response,
+  res: Response
 ): Promise<void> => {
   if (req.userId === undefined) {
     res.status(401).json({ message: "Unauthorized" });
@@ -498,11 +441,11 @@ export const signup = async (req: AuthenticatedRequest, res: Response) => {
           headers: {
             apikey: process.env.KONG_API_KEY,
           },
-        },
+        }
       );
       const response = await sendVerificationCode(
         req.body.email.toLowerCase(),
-        tempCode,
+        tempCode
       );
       if (response && response.err) {
         res.status(500).send({ message: response.err });
@@ -521,12 +464,10 @@ export const signup = async (req: AuthenticatedRequest, res: Response) => {
       const sentTime = existingUser.verification.sentTime.getTime();
 
       if (sentTime > now - 60000) {
-        res
-          .status(425)
-          .send({
-            message:
-              "Please wait a minute before requesting another verification code.",
-          });
+        res.status(425).send({
+          message:
+            "Please wait a minute before requesting another verification code.",
+        });
         return;
       }
 
@@ -535,7 +476,7 @@ export const signup = async (req: AuthenticatedRequest, res: Response) => {
         // Send new code & Update user
         const response = await sendVerificationCode(
           req.body.email.toLowerCase(),
-          existingUser.verification.code,
+          existingUser.verification.code
         );
         if (response && response.err) {
           res.status(500).send({ message: response.err });
@@ -568,7 +509,7 @@ export const signup = async (req: AuthenticatedRequest, res: Response) => {
       });
       const response = await sendVerificationCode(
         req.body.email.toLowerCase(),
-        tempCode,
+        tempCode
       );
       if (response && response.err) {
         res.status(500).send({ message: response.err });
@@ -606,12 +547,10 @@ export const login = async (req: AuthenticatedRequest, res: Response) => {
       existingUser.verification.sentTime.getTime() >
         new Date().getTime() - 1000 * 60
     ) {
-      res
-        .status(425)
-        .send({
-          message:
-            "Please wait a minute before requesting another verification code.",
-        });
+      res.status(425).send({
+        message:
+          "Please wait a minute before requesting another verification code.",
+      });
       return;
     }
 
@@ -656,7 +595,7 @@ export const login = async (req: AuthenticatedRequest, res: Response) => {
 
 export const verifyAccount = async (
   req: AuthenticatedRequest,
-  res: Response,
+  res: Response
 ) => {
   try {
     // If code or email missing in body
@@ -685,11 +624,9 @@ export const verifyAccount = async (
       return;
     }
     if (existingUser.verification.expiry.getTime() < new Date().getTime()) {
-      res
-        .status(401)
-        .send({
-          message: "Verification code expired. Please request a new one.",
-        });
+      res.status(401).send({
+        message: "Verification code expired. Please request a new one.",
+      });
       return;
     }
     if (!existingUser.emailVerified) {

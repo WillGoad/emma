@@ -112,14 +112,16 @@ model Verification {
 }
 
 model Charge {
-  id                 String      @id @default(auto()) @map("_id") @db.ObjectId
-  dataProductId      String      @db.ObjectId
-  originalChargeDate DateTime
-  lastChargeDate     DateTime
-  chargeAmount       Float
-  userId             String      @db.ObjectId
-  user               User        @relation(fields: [userId], references: [id])
-  dataProduct        DataProduct @relation(fields: [dataProductId], references: [id])
-  createdAt          DateTime    @default(now())
-  updatedAt          DateTime    @updatedAt
+  id            String      @id @default(auto()) @map("_id") @db.ObjectId
+  startTime     DateTime
+  endTime       DateTime?
+  amount        Float
+  currency      String
+  interval      PayInterval
+  userId        String      @db.ObjectId
+  user          User        @relation(fields: [userId], references: [id])
+  dataProductId String      @db.ObjectId
+  dataProduct   DataProduct @relation(fields: [dataProductId], references: [id])
+  createdAt     DateTime    @default(now())
+  updatedAt     DateTime    @updatedAt
 }
