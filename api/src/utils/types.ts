@@ -33,7 +33,6 @@ export type DataProductWithKong = Prisma.DataProductGetPayload<{
         shortName: true;
       };
     };
-    users: { select: { id: true } };
   };
 }> & {
   kongDetails: KongDataProductDetails | null;

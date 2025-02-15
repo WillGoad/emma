@@ -13,6 +13,7 @@ export interface UserData {
   userName?: string;
   email?: string;
   picture?: string;
+  balances?: any[];
 }
 
 export enum PageEnum {

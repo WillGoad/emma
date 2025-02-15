@@ -1,30 +1,33 @@
+# Stage 1: Builder
 FROM node:18-alpine AS builder
 WORKDIR /app
 
+# Install build dependencies
+COPY package*.json ./
 COPY prisma/ ./prisma/
-COPY package.json package-lock.json* ./
+RUN npm ci --include=dev
 
-# Install dependencies and generate Prisma client
-RUN if [ -f package-lock.json ]; then npm ci; else npm install; fi
+# Generate Prisma client
 RUN npx prisma generate
 
-# Copy source code and build
+# Build application
 COPY . .
 RUN npm run build
 
-# Production stage
+# Stage 2: Production
 FROM node:18-alpine
 WORKDIR /app
 
-# Copy built files and Prisma artifacts
-COPY --from=builder /app/dist ./dist
-COPY --from=builder /app/node_modules/.prisma ./node_modules/.prisma/
-
 # Install production dependencies
 COPY package*.json ./
-RUN npm ci --production
+RUN npm ci
 
-# Ensure Prisma schema is available
-COPY prisma/ ./prisma/
+# Copy built files from builder
+COPY --from=builder /app/dist ./dist
+COPY --from=builder /app/node_modules/.prisma ./node_modules/.prisma/
+COPY --from=builder /app/node_modules/@prisma/client ./node_modules/@prisma/client
+
+# Copy Prisma schema
+COPY --from=builder /app/prisma ./prisma
 
 CMD ["node", "dist/index.js"]

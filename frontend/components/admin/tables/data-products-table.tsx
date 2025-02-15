@@ -56,7 +56,7 @@ const DataProductsTable = ({ dataProducts }: DataProductsTableProps) => {
 
     return false;
   };
-
+  console.log("Data Products: ", dataProducts);
   return (
     <main className="flex-1 items-start gap-4 p-4 sm:px-6 sm:py-0 md:gap-8 mr-12">
       <div className="flex flex-col justify-center max-w-full">
@@ -212,9 +212,11 @@ const DataProductsTable = ({ dataProducts }: DataProductsTableProps) => {
                           : "-"}
                       </TableCell>
                       <TableCell>
-                        {(product.users && product.users.length) ||
-                        product.users.length === 0
-                          ? product.users.length
+                        {(product.subscriptions &&
+                          product.subscriptions.length) ||
+                        (product.subscriptions &&
+                          product.subscriptions.length === 0)
+                          ? product.subscriptions.length
                           : "-"}
                       </TableCell>
                     </TableRow>

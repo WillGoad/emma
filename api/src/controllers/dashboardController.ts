@@ -3,7 +3,12 @@ import axios from "axios";
 import dotenv from "dotenv";
 
 import { prisma } from "..";
-import { AuthenticatedRequest, DataProductWithKong, KongDataProductDetails, Organisation } from "../utils/types";
+import {
+  AuthenticatedRequest,
+  DataProductWithKong,
+  KongDataProductDetails,
+  Organisation,
+} from "../utils/types";
 import { DataProductStatus, Prisma } from "@prisma/client";
 
 dotenv.config();
@@ -15,7 +20,7 @@ const KONG_HEADERS = {
 
 export const getDashboardDataForUser = async (
   req: AuthenticatedRequest,
-  res: Response,
+  res: Response
 ): Promise<void> => {
   try {
     const { userId } = req;
@@ -69,7 +74,6 @@ export const getDashboardDataForUser = async (
                   shortName: true,
                 },
               },
-              users: { select: { id: true } },
             },
           }),
           prisma.organisation.findMany({
@@ -83,7 +87,7 @@ export const getDashboardDataForUser = async (
             kongDetails: product.kongServiceID
               ? await getAdminDataProductDetailsFromKong(product.kongServiceID)
               : null,
-          })),
+          }))
         );
 
         response.dataProductsTableData = productsWithKong;
@@ -108,6 +112,12 @@ export const getDashboardDataForUser = async (
             organisation: {
               select: { id: true, name: true, logoUrl: true, shortName: true },
             },
+            Subscriptions: {
+              select: {
+                id: true,
+                userId: true,
+              },
+            },
           },
         }),
         prisma.organisation.findMany({
@@ -127,7 +137,7 @@ export const getDashboardDataForUser = async (
 };
 
 const getAdminDataProductDetailsFromKong = async (
-  serviceId: string,
+  serviceId: string
 ): Promise<KongDataProductDetails> => {
   const result: KongDataProductDetails = {
     serviceResponseBody: null,
@@ -139,7 +149,7 @@ const getAdminDataProductDetailsFromKong = async (
       `${process.env.KONG_ADMIN_URL}/services/${serviceId}`,
       {
         headers: KONG_HEADERS,
-      },
+      }
     );
     result.serviceResponseBody = serviceResponse.data;
 
@@ -147,7 +157,7 @@ const getAdminDataProductDetailsFromKong = async (
       `${process.env.KONG_ADMIN_URL}/services/${serviceId}/routes`,
       {
         headers: KONG_HEADERS,
-      },
+      }
     );
     result.routeResponseBody = routesResponse.data;
   } catch (error) {
@@ -190,7 +200,7 @@ const getUserAPIKeyFromKong = async (userId: string): Promise<KeyAuth> => {
   // Validate environment variables
   if (!KONG_ADMIN_URL || !KONG_API_KEY) {
     throw new Error(
-      "KONG_ADMIN_URL and KONG_API_KEY must be set in environment variables",
+      "KONG_ADMIN_URL and KONG_API_KEY must be set in environment variables"
     );
   }
 
@@ -200,7 +210,7 @@ const getUserAPIKeyFromKong = async (userId: string): Promise<KeyAuth> => {
       `${KONG_ADMIN_URL}/consumers?custom_id=${userId}`,
       {
         headers: { apikey: KONG_API_KEY },
-      },
+      }
     );
 
     const consumers = consumerResponse.data.data;
@@ -222,7 +232,7 @@ const getUserAPIKeyFromKong = async (userId: string): Promise<KeyAuth> => {
       `${KONG_ADMIN_URL}/consumers/${kongId}/key-auth`,
       {
         headers: { apikey: KONG_API_KEY },
-      },
+      }
     );
 
     return keyAuthResponse.data.data[0];

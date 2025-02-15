@@ -81,8 +81,7 @@ export const subscribeUserToDataProduct = async (
         (b) => b.currency === dataProduct.currency
       );
       if (!userBalance || userBalance.amount < price) {
-        res.status(400).json({ message: "Insufficient balance" });
-        return;
+        throw new Error("Insufficient balance");
       }
 
       const newSubscription = await tx.subscription.create({
@@ -221,7 +220,7 @@ export const getUserDetails = async (
 
     const user = await prisma.user.findUnique({
       where: { id: userId },
-      include: { subscriptions: true }, // Include subscriptions in the user object
+      include: { subscriptions: true, balances: true }, // Include subscriptions in the user object
     });
 
     if (!user) {
@@ -235,6 +234,7 @@ export const getUserDetails = async (
       userName: user.userName,
       email: user.email,
       role: user.role,
+      balances: user.balances,
       subscriptions: user.subscriptions.map((sub: Subscription) => sub.id),
     };
 

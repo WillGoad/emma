@@ -82,18 +82,19 @@ const DataSetCard = ({
         </CardDescription>
       </CardHeader>
       <CardContent>
-        {isSubscribedUI && keyAuth && (
+        {(product.pricingMode === PricingMode.FREE ||
+          (isSubscribed && keyAuth)) && (
           <div className="flex w-full max-w-sm items-center space-x-2">
             <Input
               type="email"
-              placeholder={`https://data.emmadata.org/${product.organisation.shortName}/${product.accessURL}?apikey=${keyAuth.key}`}
+              placeholder={`https://data.emmadata.org/${product.organisation.shortName}/${product.accessURL}?apikey=${keyAuth?.key}`}
               readOnly
             />
             <Button
               type="submit"
               onClick={() =>
                 copyToClipboard(
-                  `https://data.emmadata.org/${product.organisation.shortName}/${product.accessURL}?apikey=${keyAuth.key}`,
+                  `https://data.emmadata.org/${product.organisation.shortName}/${product.accessURL}?apikey=${keyAuth?.key}`,
                   toast
                 )
               }
@@ -103,11 +104,13 @@ const DataSetCard = ({
           </div>
         )}
       </CardContent>
-      <CardFooter>
-        <button onClick={handleToggleSubscription}>
-          {isSubscribedUI ? "Unsubscribe" : "Subscribe"}
-        </button>
-      </CardFooter>
+      {product.pricingMode !== PricingMode.FREE && (
+        <CardFooter>
+          <button onClick={handleToggleSubscription}>
+            {isSubscribedUI ? "Unsubscribe" : "Subscribe"}
+          </button>
+        </CardFooter>
+      )}
     </Card>
   );
 };
