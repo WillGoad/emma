@@ -13,7 +13,17 @@ export const prisma = new PrismaClient();
 
 const app = express();
 
-app.use(cors());
+// Configure CORS
+const corsOptions = {
+  origin: process.env.FRONTEND_URL || process.env.INTERNAL_RENDER_URL || 'http://localhost:3000', // Allow your frontend URL
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'], // Allowed HTTP methods
+  allowedHeaders: ['Content-Type', 'Authorization'], // Allowed headers
+  credentials: true, // Allow cookies and credentials
+  optionsSuccessStatus: 200 // Legacy browsers choke on 204
+};
+
+app.use(cors(corsOptions));
+app.options('*', cors(corsOptions));
 
 app.use(express.json());
 
