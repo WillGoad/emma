@@ -61,7 +61,6 @@ export const getDataProducts = async (
         organisationID: product.organisationID,
       })
     );
-
     res.status(200).json(mappedDataProducts);
   } catch (error) {
     console.error("Error fetching data products:", error);

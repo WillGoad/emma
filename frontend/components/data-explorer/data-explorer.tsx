@@ -14,6 +14,12 @@ export const DataExplorer = () => {
 
   const [filter, setFilter] = useState<string>("all");
   const [open, setOpen] = useState<boolean>(false);
+  const [subscribeSheetProductID, setSubscribeSheetProductID] = useState<string | null>(null);
+
+  const openSubscribeSheet = (productID: string) => {
+    setSubscribeSheetProductID(productID);
+    setOpen(true);
+  }
 
   const filterDataProducts = (product: DataProduct) => {
     if (filter === "all") return true;
@@ -46,7 +52,7 @@ export const DataExplorer = () => {
         onFilterChange={setFilter}
         activeFilter={filter}
       />
-      <SubscribeSheet open={open} setOpen={setOpen} />
+      {subscribeSheetProductID && <SubscribeSheet open={open} setOpen={setOpen} productID={subscribeSheetProductID} />}
       <div className="h-fit w-full mt-4 mb-12 px-10">
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-8">
           {dataProducts &&
@@ -61,6 +67,7 @@ export const DataExplorer = () => {
                       ? user?.subscriptions.includes(product.id)
                       : false
                   }
+                  openSubscribeSheet={openSubscribeSheet}
                 />
               ))}
         </div>

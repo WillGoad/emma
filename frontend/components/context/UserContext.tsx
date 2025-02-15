@@ -52,6 +52,7 @@ export const UserProvider: React.FC<{ children: React.ReactNode }> = ({
       if (response?.isSuccess && response.data) {
         const { dataProductsTableData, organisationsData, keyAuth } =
           response.data;
+          console.log("Response: ", response.data);
         setDataProductsData(dataProductsTableData);
         setOrganisationsData(organisationsData);
         setKeyAuth(keyAuth);

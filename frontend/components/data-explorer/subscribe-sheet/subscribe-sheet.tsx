@@ -1,26 +1,34 @@
+import { useUserData } from "@/components/context/UserContext";
 import {
   Sheet,
   SheetContent,
   SheetDescription,
   SheetHeader,
   SheetTitle,
-  SheetTrigger,
 } from "@/components/ui/sheet";
+import { PricingMode } from "@/lib/types";
 
 interface SubscribeSheetProps {
   open: boolean;
   setOpen: (open: boolean) => void;
+  productID: string;
 }
 
-const SubscribeSheet = ({ open, setOpen }: SubscribeSheetProps) => {
+const SubscribeSheet = ({ open, setOpen, productID }: SubscribeSheetProps) => {
+  const { user, dataProducts, organisations = [] } = useUserData();
+  const isSubscribed = user?.subscriptions?.includes(productID);
+  const product = dataProducts?.find((product) => product.id === productID);
+  console.log(user, dataProducts, organisations);
   return (
-    <Sheet open={open} onOpenChange={setOpen}>
+    <Sheet open={!!productID && open} onOpenChange={setOpen}>
       <SheetContent>
         <SheetHeader>
-          <SheetTitle>Are you absolutely sure?</SheetTitle>
+          <SheetTitle>{isSubscribed ? "Cancel your subscription" : "Confirm your subscription"}</SheetTitle>
           <SheetDescription>
-            This action cannot be undone. This will permanently delete your
-            account and remove your data from our servers.
+            {product?.name}
+            {product?.description}
+            {product?.pricingMode === PricingMode.FREE && "This product is free, subscribe to get data."}
+            {product?.pricingMode === PricingMode.SUBSCRIPTION && "Charges for this product will be deducted from your account balance hourly or when you unsubscribe."}
           </SheetDescription>
         </SheetHeader>
       </SheetContent>

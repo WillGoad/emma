@@ -53,6 +53,7 @@ export const getDashboardDataForUser = async (
             select: {
               id: true,
               name: true,
+              description: true,
               accessURL: true,
               kongServiceID: true,
               price: true,

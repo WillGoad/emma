@@ -80,26 +80,31 @@ model DataProduct {
   currency        String?
   pricingMode     PriceStructureMode
   paymentInterval PayInterval?
-  Charge          Charge[]
-  userIDs         String[]           @db.ObjectId
-  users           User[]             @relation(fields: [userIDs], references: [id])
+  Subscriptions   Subscription[]
   createdAt       DateTime           @default(now())
   updatedAt       DateTime           @updatedAt
 }
 
 model User {
-  id             String        @id @default(auto()) @map("_id") @db.ObjectId
+  id             String         @id @default(auto()) @map("_id") @db.ObjectId
   userName       String
-  email          String        @unique
+  email          String         @unique
   role           UserRole
-  organisationID String?       @db.ObjectId
-  dataProductIDs String[]      @db.ObjectId
-  subscriptions  DataProduct[] @relation(fields: [dataProductIDs], references: [id])
-  charges        Charge[]
+  organisationID String?        @db.ObjectId
+  subscriptions  Subscription[]
   verification   Verification?
-  emailVerified  Boolean       @default(false)
-  createdAt      DateTime      @default(now())
-  updatedAt      DateTime      @updatedAt
+  emailVerified  Boolean        @default(false)
+  balances       Balance[]
+  createdAt      DateTime       @default(now())
+  updatedAt      DateTime       @updatedAt
+}
+
+model Balance {
+  id       String @id @default(auto()) @map("_id") @db.ObjectId
+  currency String // USD, EUR, or GBP
+  amount   Float
+  userId   String @db.ObjectId
+  user     User   @relation(fields: [userId], references: [id])
 }
 
 model Verification {
@@ -111,10 +116,12 @@ model Verification {
   user     User     @relation(fields: [userId], references: [id])
 }
 
-model Charge {
+model Subscription {
   id            String      @id @default(auto()) @map("_id") @db.ObjectId
   startTime     DateTime
-  endTime       DateTime?
+  charges       Charge[]
+  accessEndTime DateTime
+  cancelledTime DateTime?
   amount        Float
   currency      String
   interval      PayInterval
@@ -124,4 +131,13 @@ model Charge {
   dataProduct   DataProduct @relation(fields: [dataProductId], references: [id])
   createdAt     DateTime    @default(now())
   updatedAt     DateTime    @updatedAt
+}
+
+model Charge {
+  id             String       @id @default(auto()) @map("_id") @db.ObjectId
+  amount         Float
+  currency       String
+  time           DateTime
+  subscriptionId String       @db.ObjectId
+  subscription   Subscription @relation(fields: [subscriptionId], references: [id])
 }

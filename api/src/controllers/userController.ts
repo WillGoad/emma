@@ -5,8 +5,9 @@ import { prisma } from "..";
 import { AuthenticatedRequest } from "../utils/types";
 import axios from "axios";
 import dotenv from "dotenv";
-import { DataProduct, UserRole } from "@prisma/client";
+import { DataProduct, Subscription, UserRole } from "@prisma/client";
 import { addUserToProductACL, removeUserFromProductACL } from "../utils/kong";
+import { calculateEndTime } from "../utils/helpers";
 
 dotenv.config();
 
@@ -33,7 +34,7 @@ export const subscribeUserToDataProduct = async (
     const [user, dataProduct] = await prisma.$transaction([
       prisma.user.findUnique({
         where: { id: userId },
-        include: { subscriptions: { select: { id: true } } },
+        include: { subscriptions: { select: { id: true } }, balances: true },
       }),
       prisma.dataProduct.findUnique({
         where: { id: productId },
@@ -68,35 +69,56 @@ export const subscribeUserToDataProduct = async (
     }
 
     await prisma.$transaction(async (tx) => {
-      // Create charge if applicable
       if (
         dataProduct.pricingMode === "SUBSCRIPTION" &&
         dataProduct.price &&
         dataProduct.paymentInterval
       ) {
-        await tx.charge.create({
+        const userBalance = user.balances.find(
+          (b) => b.currency === dataProduct.currency
+        );
+        if (!userBalance || userBalance.amount < dataProduct.price) {
+          res.status(400).json({ message: "Insufficient balance" });
+          return;
+        }
+
+        const newSubscription = await tx.subscription.create({
           data: {
             interval: dataProduct.paymentInterval,
             startTime: new Date(),
-            endTime: null,
+            accessEndTime: calculateEndTime(
+              new Date(),
+              dataProduct.paymentInterval
+            ),
+            cancelledTime: null,
             amount: dataProduct.price,
             currency: dataProduct.currency || "GBP",
             dataProductId: productId,
             userId: user.id,
           },
         });
+
+        //Create charge
+        await tx.charge.create({
+          data: {
+            amount: dataProduct.price,
+            currency: dataProduct.currency || "GBP",
+            time: new Date(),
+            subscriptionId: newSubscription.id
+          },
+        });
+
+        // Deduct the amount from user's balance
+        await tx.balance.update({
+          where: { id: userBalance.id },
+          data: { amount: userBalance.amount - dataProduct.price },
+        });
+
+        await tx.user.update({
+          where: { id: userId },
+          data: { subscriptions: { connect: { id: productId } } },
+        });
       }
-
-      // Update relations using connect
-      await tx.dataProduct.update({
-        where: { id: productId },
-        data: { users: { connect: { id: userId } } },
-      });
-
-      await tx.user.update({
-        where: { id: userId },
-        data: { subscriptions: { connect: { id: productId } } },
-      });
     });
 
     await addUserToProductACL(userId, productId);
@@ -157,16 +179,9 @@ export const unsubscribeUserFromDataProduct = async (
     }
 
     await prisma.$transaction(async (tx) => {
-      // Remove related charges
-      await tx.charge.updateMany({
-        where: { userId, dataProductId: productId, endTime: null },
-        data: { endTime: new Date() }
-      });
-
-      // Update relations using disconnect
-      await tx.dataProduct.update({
-        where: { id: productId },
-        data: { users: { disconnect: { id: userId } } },
+      await tx.subscription.updateMany({
+        where: { userId, dataProductId: productId, cancelledTime: null },
+        data: { cancelledTime: new Date() },
       });
 
       await tx.user.update({
@@ -176,8 +191,6 @@ export const unsubscribeUserFromDataProduct = async (
         },
       });
     });
-
-    await removeUserFromProductACL(userId, productId);
 
     res.status(200).json({ message: "User unsubscribed successfully" });
   } catch (error) {
@@ -215,7 +228,7 @@ export const getUserDetails = async (
       userName: user.userName,
       email: user.email,
       role: user.role,
-      subscriptions: user.subscriptions.map((sub: DataProduct) => sub.id),
+      subscriptions: user.subscriptions.map((sub: Subscription) => sub.id),
     };
 
     res.status(200).json(userDetails);
@@ -416,9 +429,6 @@ export const signup = async (req: AuthenticatedRequest, res: Response) => {
           role: UserRole.DATA_BUYER,
           subscriptions: {
             connect: [],
-          },
-          charges: {
-            create: [], // Initialize with an empty array of charges
           },
           verification: {
             create: {

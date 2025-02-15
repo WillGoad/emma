@@ -16,8 +16,6 @@ import {
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { useToast } from "../hooks/use-toast";
-import { LoadingSpinner } from "../loading-spinner/loading-spinner";
-import { handleSubscribe, handleUnsubscribe } from "@/lib/api/api-utils";
 import { useUserData } from "../context/UserContext";
 import { Button } from "../ui/button";
 import { DataProduct, PricingMode } from "@/lib/types";
@@ -26,12 +24,16 @@ import { copyToClipboard } from "@/lib/utils";
 interface DataSetCardProps {
   product: DataProduct;
   isSubscribed: boolean;
+  openSubscribeSheet: (productID: string) => void;
 }
 
-const DataSetCard = ({ product, isSubscribed }: DataSetCardProps) => {
+const DataSetCard = ({
+  product,
+  isSubscribed,
+  openSubscribeSheet,
+}: DataSetCardProps) => {
   const { user, keyAuth } = useUserData();
   const [isSubscribedUI, setIsSubscribedUI] = useState(isSubscribed);
-  const [isSubscribeLoading, setIsSubscribeLoading] = useState(false);
   const { toast } = useToast();
 
   useEffect(() => {
@@ -45,37 +47,8 @@ const DataSetCard = ({ product, isSubscribed }: DataSetCardProps) => {
         title: "Error! 😢",
         description: "Please login to subscribe.",
       });
-    }
-    try {
-      setIsSubscribeLoading(true);
-      if (isSubscribedUI) {
-        const response = await handleUnsubscribe(product.id);
-        if (response?.ok) {
-          setIsSubscribedUI(false);
-        } else {
-          toast({
-            title: "Error! 😢",
-            description: "An error occurred while unsubscribing.",
-          });
-        }
-      } else {
-        const response = await handleSubscribe(product.id);
-        if (response?.ok) {
-          setIsSubscribedUI(true);
-        } else {
-          toast({
-            title: "Error! 😢",
-            description: "An error occurred while subscribing.",
-          });
-        }
-      }
-      setIsSubscribeLoading(false);
-    } catch (error) {
-      setIsSubscribeLoading(false);
-      toast({
-        title: "Error! 😢",
-        description: "An error occurred while changing subscription status.",
-      });
+    } else {
+      openSubscribeSheet(product.id);
     }
   };
 
@@ -121,7 +94,7 @@ const DataSetCard = ({ product, isSubscribed }: DataSetCardProps) => {
               onClick={() =>
                 copyToClipboard(
                   `https://data.emmadata.org/${product.organisation.shortName}/${product.accessURL}?apikey=${keyAuth.key}`,
-                  toast,
+                  toast
                 )
               }
             >
@@ -131,13 +104,9 @@ const DataSetCard = ({ product, isSubscribed }: DataSetCardProps) => {
         )}
       </CardContent>
       <CardFooter>
-        {isSubscribeLoading === true ? (
-          <LoadingSpinner />
-        ) : (
-          <button onClick={handleToggleSubscription}>
-            {isSubscribedUI ? "Unsubscribe" : "Subscribe"}
-          </button>
-        )}
+        <button onClick={handleToggleSubscription}>
+          {isSubscribedUI ? "Unsubscribe" : "Subscribe"}
+        </button>
       </CardFooter>
     </Card>
   );
