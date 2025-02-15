@@ -346,17 +346,19 @@ export const createKongServiceForProduct = async (
   }
 };
 
-export const deleteKongServiceByID = async (serviceId: string): Promise<void> => {
+export const deleteKongServiceByID = async (
+  serviceId: string
+): Promise<void> => {
   try {
     // Validate input
     if (!serviceId?.trim()) {
-      throw new Error('Invalid service ID provided');
+      throw new Error("Invalid service ID provided");
     }
 
     // Check environment configuration
     const { KONG_ADMIN_URL } = process.env;
     if (!KONG_ADMIN_URL) {
-      throw new Error('KONG_ADMIN_URL environment variable not configured');
+      throw new Error("KONG_ADMIN_URL environment variable not configured");
     }
 
     // Make API call with timeout
@@ -364,7 +366,7 @@ export const deleteKongServiceByID = async (serviceId: string): Promise<void> =>
       `${KONG_ADMIN_URL}/services/${encodeURIComponent(serviceId)}`,
       {
         headers: getKongHeaders(),
-        timeout: 5000 // 5-second timeout
+        timeout: 5000, // 5-second timeout
       }
     );
 
@@ -375,18 +377,151 @@ export const deleteKongServiceByID = async (serviceId: string): Promise<void> =>
 
     // Optional: Add debug logging
     console.debug(`Successfully deleted Kong service ${serviceId}`);
-
   } catch (error) {
     // Enhanced error handling
     const errorMessage = axios.isAxiosError(error)
       ? `Kong API Error: ${error.response?.status} - ${error.response?.data?.message}`
       : error instanceof Error
-      ? error.message
-      : 'Unknown error occurred';
+        ? error.message
+        : "Unknown error occurred";
 
-    console.error(`Failed to delete Kong service ${serviceId}: ${errorMessage}`);
-    
+    console.error(
+      `Failed to delete Kong service ${serviceId}: ${errorMessage}`
+    );
+
     // Preserve original error stack while adding context
-    throw new Error(`Failed to delete Kong service: ${errorMessage}`, { cause: error });
+    throw new Error(`Failed to delete Kong service: ${errorMessage}`, {
+      cause: error,
+    });
   }
 };
+
+const BATCH_SIZE = 100;
+
+// 1. Function to add all users to all free products' ACLs
+export async function addAllUsersToFreeProductACLs(): Promise<void> {
+  try {
+    // Get all free data products
+    const freeProducts = await prisma.dataProduct.findMany({
+      where: { pricingMode: "FREE" },
+      select: { id: true },
+    });
+
+    if (freeProducts.length === 0) {
+      console.log("No free data products found");
+      return;
+    }
+
+    // Process users in batches
+    let skip = 0;
+    while (true) {
+      const users = await prisma.user.findMany({
+        skip,
+        take: BATCH_SIZE,
+        select: { id: true },
+      });
+
+      if (users.length === 0) break;
+
+      // Process each user-product combination
+      for (const user of users) {
+        for (const product of freeProducts) {
+          try {
+            await addUserToProductACL(user.id, product.id);
+            console.log(`Added user ${user.id} to product ${product.id} ACL`);
+          } catch (error) {
+            console.error(
+              `Error adding user ${user.id} to product ${product.id}:`,
+              error
+            );
+          }
+        }
+      }
+
+      skip += BATCH_SIZE;
+    }
+  } catch (error) {
+    console.error("Error in addAllUsersToFreeProductACLs:", error);
+    throw error;
+  }
+}
+
+// 1. Function to add all users to all free products' ACLs
+export async function addAllUsersToProductACL(
+  productID: string
+): Promise<void> {
+  try {
+    // Get all free data products
+    const existingProduct = await prisma.dataProduct.findUnique({
+      where: { id: productID },
+      select: { id: true },
+    });
+
+    if (!existingProduct) {
+      console.log("Product not found");
+      return;
+    }
+
+    // Process users in batches
+    let skip = 0;
+    while (true) {
+      const users = await prisma.user.findMany({
+        skip,
+        take: BATCH_SIZE,
+        select: { id: true },
+      });
+
+      if (users.length === 0) break;
+
+      // Process each user-product combination
+      for (const user of users) {
+        try {
+          await addUserToProductACL(user.id, productID);
+          console.log(`Added user ${user.id} to product ${productID} ACL`);
+        } catch (error) {
+          console.error(
+            `Error adding user ${user.id} to product ${productID}:`,
+            error
+          );
+        }
+      }
+
+      skip += BATCH_SIZE;
+    }
+  } catch (error) {
+    console.error("Error in addAllUsersToFreeProductACLs:", error);
+    throw error;
+  }
+}
+
+// Function to add single user to all free products (for signups)
+export async function addUserToFreeProducts(userId: string): Promise<void> {
+  try {
+    const freeProducts = await prisma.dataProduct.findMany({
+      where: { pricingMode: "FREE" },
+      select: { id: true },
+    });
+
+    if (freeProducts.length === 0) {
+      console.log("No free data products to add user to");
+      return;
+    }
+
+    await Promise.allSettled(
+      freeProducts.map(async (product) => {
+        try {
+          await addUserToProductACL(userId, product.id);
+          console.log(`Added new user ${userId} to product ${product.id} ACL`);
+        } catch (error) {
+          console.error(
+            `Error adding new user to product ${product.id}:`,
+            error
+          );
+        }
+      })
+    );
+  } catch (error) {
+    console.error("Error in addNewUserToFreeProducts:", error);
+    throw error;
+  }
+}

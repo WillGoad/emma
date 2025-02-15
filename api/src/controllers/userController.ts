@@ -5,8 +5,8 @@ import { prisma } from "..";
 import { AuthenticatedRequest } from "../utils/types";
 import axios from "axios";
 import dotenv from "dotenv";
-import { DataProduct, Subscription, UserRole } from "@prisma/client";
-import { addUserToProductACL, removeUserFromProductACL } from "../utils/kong";
+import { Subscription, UserRole } from "@prisma/client";
+import { addUserToFreeProducts, addUserToProductACL } from "../utils/kong";
 import { calculateEndTime } from "../utils/helpers";
 
 dotenv.config();
@@ -51,6 +51,14 @@ export const subscribeUserToDataProduct = async (
       return;
     }
 
+    // Enforce subscription-only endpoint
+    if (dataProduct.pricingMode !== "SUBSCRIPTION") {
+      res
+        .status(400)
+        .json({ message: "This endpoint is for subscription products only" });
+      return;
+    }
+
     // Check existing subscription using relation
     if (user.subscriptions.some((sub) => sub.id === productId)) {
       res.status(409).json({ message: "Already subscribed" });
@@ -58,67 +66,58 @@ export const subscribeUserToDataProduct = async (
     }
 
     // Validate pricing structure
-    if (
-      dataProduct.pricingMode === "SUBSCRIPTION" &&
-      (!dataProduct.price || !dataProduct.paymentInterval)
-    ) {
+    if (!dataProduct.price || !dataProduct.paymentInterval) {
       res.status(400).json({
         message: "Subscription product requires price and payment interval",
       });
       return;
     }
 
+    const paymentInterval = dataProduct.paymentInterval!;
+    const price = dataProduct.price!;
+
     await prisma.$transaction(async (tx) => {
-      if (
-        dataProduct.pricingMode === "SUBSCRIPTION" &&
-        dataProduct.price &&
-        dataProduct.paymentInterval
-      ) {
-        const userBalance = user.balances.find(
-          (b) => b.currency === dataProduct.currency
-        );
-        if (!userBalance || userBalance.amount < dataProduct.price) {
-          res.status(400).json({ message: "Insufficient balance" });
-          return;
-        }
-
-        const newSubscription = await tx.subscription.create({
-          data: {
-            interval: dataProduct.paymentInterval,
-            startTime: new Date(),
-            accessEndTime: calculateEndTime(
-              new Date(),
-              dataProduct.paymentInterval
-            ),
-            cancelledTime: null,
-            amount: dataProduct.price,
-            currency: dataProduct.currency || "GBP",
-            dataProductId: productId,
-            userId: user.id,
-          },
-        });
-
-        //Create charge
-        await tx.charge.create({
-          data: {
-            amount: dataProduct.price,
-            currency: dataProduct.currency || "GBP",
-            time: new Date(),
-            subscriptionId: newSubscription.id
-          },
-        });
-
-        // Deduct the amount from user's balance
-        await tx.balance.update({
-          where: { id: userBalance.id },
-          data: { amount: userBalance.amount - dataProduct.price },
-        });
-
-        await tx.user.update({
-          where: { id: userId },
-          data: { subscriptions: { connect: { id: productId } } },
-        });
+      const userBalance = user.balances.find(
+        (b) => b.currency === dataProduct.currency
+      );
+      if (!userBalance || userBalance.amount < price) {
+        res.status(400).json({ message: "Insufficient balance" });
+        return;
       }
+
+      const newSubscription = await tx.subscription.create({
+        data: {
+          interval: paymentInterval,
+          startTime: new Date(),
+          accessEndTime: calculateEndTime(new Date(), paymentInterval),
+          cancelledTime: null,
+          amount: price,
+          currency: dataProduct.currency || "GBP",
+          dataProductId: productId,
+          userId: user.id,
+        },
+      });
+
+      //Create charge
+      await tx.charge.create({
+        data: {
+          amount: price,
+          currency: dataProduct.currency || "GBP",
+          time: new Date(),
+          subscriptionId: newSubscription.id,
+        },
+      });
+
+      // Deduct the amount from user's balance
+      await tx.balance.update({
+        where: { id: userBalance.id },
+        data: { amount: userBalance.amount - price },
+      });
+
+      await tx.user.update({
+        where: { id: userId },
+        data: { subscriptions: { connect: { id: productId } } },
+      });
     });
 
     await addUserToProductACL(userId, productId);
@@ -169,6 +168,14 @@ export const unsubscribeUserFromDataProduct = async (
 
     if (!dataProduct) {
       res.status(404).json({ message: "Data product not found" });
+      return;
+    }
+
+    // Enforce subscription-only endpoint
+    if (dataProduct.pricingMode !== "SUBSCRIPTION") {
+      res
+        .status(400)
+        .json({ message: "This endpoint is for subscription products only" });
       return;
     }
 
@@ -647,6 +654,7 @@ export const verifyAccount = async (
         },
       });
     }
+    await addUserToFreeProducts(existingUser.id);
     if (!process.env.JWT_SECRET) {
       res.status(500).send({ message: "JWT secret not found." });
       return;

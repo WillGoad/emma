@@ -12,6 +12,7 @@ import {
   UserRole,
 } from "@prisma/client";
 import {
+  addAllUsersToProductACL,
   createKongServiceForProduct,
   deleteKongServiceByID,
   upsertKongService,
@@ -220,6 +221,8 @@ export const createDataProduct = async (
       throw new Error("Failed to configure API gateway");
     }
 
+    await addAllUsersToProductACL(newProduct.id);
+
     // Return the created data product as a JSON response
     res.status(201).json({ message: "Data product created successfully" });
   } catch (error) {
@@ -343,6 +346,8 @@ export const updateDataProduct = async (
       
       throw new Error("Failed to update API gateway configuration");
     }
+
+    await addAllUsersToProductACL(updatedProduct.id);
 
     res.status(200).json({ message: "Data product updated successfully", data: updatedProduct });
   } catch (error) {
