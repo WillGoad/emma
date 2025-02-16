@@ -21,6 +21,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { setUserCookies } from "@/lib/utils";
 import { useToast } from "@/components/hooks/use-toast";
 import { useUserData } from "@/components/context/UserContext";
+import { mutate } from "swr";
 
 export default function Signin() {
   // const params = useSearchParams();
@@ -29,7 +30,6 @@ export default function Signin() {
   const [currentTab, setCurrentTab] = useState("email"); //["email", "confirmation"]
   const router = useRouter();
   const { toast } = useToast();
-  const { refreshData: refreshUserData } = useUserData();
 
   const onLogin = async () => {
     try {
@@ -83,7 +83,7 @@ export default function Signin() {
         });
         const data = await response.json();
         setUserCookies(data.accessToken);
-        refreshUserData();
+        mutate("user");
         router.push("/");
       }
     } catch (error) {

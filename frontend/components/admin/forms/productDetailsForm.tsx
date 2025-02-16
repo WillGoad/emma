@@ -94,9 +94,10 @@ export function ProductDetailsForm({ productData }: ProductDetailsFormProps) {
   });
 
   function onSubmit(data: ProfileFormValues) {
-    data.organisationID = organisations?.find(
+    const organisation = organisations?.find(
       (org) => org.id === data.organisation,
-    ).id;
+    );
+    data.organisationID = organisation ? organisation.id : undefined;
     delete data.organisation;
     if (productData) {
       updateDataProduct(productData, data);

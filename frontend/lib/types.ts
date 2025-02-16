@@ -117,10 +117,10 @@ export type DataProduct = {
 };
 
 export type Organization = {
-  id: true;
-  name: true;
-  logoUrl: true;
-  shortName: true;
+  id: string;
+  name: string;
+  logoUrl: string;
+  shortName: string;
 };
 
 type DataProductKongDetails = {
