@@ -1,7 +1,5 @@
 import { getCookie } from "cookies-next";
 import { USER_TOKEN } from "../constants";
-import { deleteAllCookies } from "../utils";
-import { AccessibleData } from "../types";
 
 export const handleSubscribe = async (objectID: string) => {
   const token = await getCookie(USER_TOKEN);
@@ -39,31 +37,6 @@ export const handleUnsubscribe = async (objectID: string) => {
     },
   );
   return response;
-};
-
-export const getUserDetails = async (refreshUserData: () => void) => {
-  try {
-    const accessToken = await getCookie(USER_TOKEN);
-    if (!accessToken) return;
-    const response = await fetch(
-      `${process.env.NEXT_PUBLIC_API_URL}/user/get-user-details`,
-      {
-        method: "POST",
-        headers: {
-          "x-access-token": accessToken,
-          "Content-Type": "application/json",
-        },
-      },
-    );
-    if (!response.ok) {
-      deleteAllCookies();
-      refreshUserData();
-    }
-    const data = await response.json();
-    return data;
-  } catch (error) {
-    console.error(error);
-  }
 };
 
 export const createAPIKey = async (ttl: number = 60 * 60 * 24 * 30) => {
@@ -143,37 +116,6 @@ export const getAPIKey = async () => {
       return { isSuccess: response.ok };
     }
     const data = await response.json();
-    return { data, isSuccess: response.ok };
-  } catch (error) {
-    console.error(error);
-    return;
-  }
-};
-
-export const getAccessibleData = async () => {
-  try {
-    const accessToken = await getCookie(USER_TOKEN);
-    const headers: Record<string, string> = {
-      "Content-Type": "application/json",
-    };
-
-    if (accessToken) {
-      headers["x-access-token"] = accessToken;
-    }
-
-    const response = await fetch(
-      `${process.env.NEXT_PUBLIC_API_URL}/dashboard/get-dashboard-data`,
-      {
-        method: "GET",
-        headers,
-      },
-    );
-    if (!response.ok) {
-      console.error("Error getting dashboard data:", response.status);
-      return { data: null, isSuccess: response.ok };
-    }
-
-    const data: AccessibleData = await response.json();
     return { data, isSuccess: response.ok };
   } catch (error) {
     console.error(error);

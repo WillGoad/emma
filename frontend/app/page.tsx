@@ -14,7 +14,6 @@ const Page = () => {
   if (error) {
     console.error("An error occurred while fetching user information.", error);
   }
-  console.log(isLoading);
   if (isLoading) return <LoadingPage />;
   const roleRoutes = roleBasedRoutes[user?.role as UserRole];
   const currentRoute = roleRoutes?.find(

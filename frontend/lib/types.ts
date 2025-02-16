@@ -116,6 +116,13 @@ export type DataProduct = {
   kongDetails: DataProductKongDetails;
 };
 
+export type Organization = {
+  id: true;
+  name: true;
+  logoUrl: true;
+  shortName: true;
+};
+
 type DataProductKongDetails = {
   serviceResponseBody: any;
   routeResponseBody: any;
@@ -130,10 +137,8 @@ export type KeyAuth = {
 // Data that user can access stored in context
 
 export type AccessibleData = {
-  dataProductsTableData: DataProduct[];
-  organisationsData: any[];
-  customersTableData: any[];
-  paymentsTableData: any[];
+  dataProducts: DataProduct[];
+  organizations: any[];
   keyAuth: KeyAuth;
 };
 

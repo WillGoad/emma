@@ -40,7 +40,6 @@ export const DataExplorer = () => {
       label: org.name,
     })),
   ];
-  console.log("USer's subs", user?.subscriptions)
   return (
     <div className="h-fit flex flex-col items-center justify-center">
       <div className="h-fit mt-4 lg:w-3/6 w-5/6">

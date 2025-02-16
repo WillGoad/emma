@@ -31,10 +31,8 @@ type CustomHitsProps = {
 const CustomHits = ({ hits, setOpen }: CustomHitsProps) => {
   const { organisations = [] } = useUserData();
 
-  console.log(hits);
   const router = useRouter();
   const organisationIDs = uniqueBy(hits, "organisationID");
-  console.log("organisations", organisations);
 
   const handleItemClick = (hit: any) => {
     if (setOpen) setOpen(false);
@@ -109,7 +107,7 @@ const SearchInput = ({ mode, open, setOpen }: SearchInputProps) => {
 
   useEffect(() => {
     setHits(dataProducts);
-  }, [dataProducts]);
+  }, []);
 
   const handleSearch = (searchTerm: string) => {
     setQuery(searchTerm);

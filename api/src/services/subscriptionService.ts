@@ -5,15 +5,15 @@ import { removeUserFromProductACL } from "../utils/kong";
 import { prisma } from "..";
 
 type SubscriptionWithRelations = Prisma.SubscriptionGetPayload<{
-    include: {
-      user: {
-        include: {
-          balances: true;
-        };
+  include: {
+    user: {
+      include: {
+        balances: true;
       };
-      dataProduct: true;
     };
-  }>;
+    dataProduct: true;
+  };
+}>;
 
 export async function checkSubscriptions() {
   const now = new Date();
@@ -40,25 +40,27 @@ export async function checkSubscriptions() {
     if (sub.cancelledTime === null) {
       await handleSubscriptionRenewal(sub, now);
     } else {
-        await removeUserFromProductACL(sub.userId, sub.dataProductId);
+      await removeUserFromProductACL(sub.userId, sub.dataProductId);
     }
   }
 }
 
-async function handleSubscriptionRenewal(sub: SubscriptionWithRelations, now: Date) {
+async function handleSubscriptionRenewal(
+  sub: SubscriptionWithRelations,
+  now: Date
+) {
   try {
     const currency = sub.currency;
     const amount = sub.amount;
     const userBalance = sub.user.balances.find((b) => b.currency === currency);
 
     if (!userBalance || userBalance.amount < amount) {
-      console.log(`Insufficient balance for subscription ${sub.id}`);
       await prisma.subscription.update({
         where: { id: sub.id },
         data: { cancelledTime: now },
       });
       await removeUserFromProductACL(sub.userId, sub.dataProductId);
-      return;
+      throw new Error(`Insufficient balance for subscription ${sub.id}`);
     }
 
     await prisma.$transaction([

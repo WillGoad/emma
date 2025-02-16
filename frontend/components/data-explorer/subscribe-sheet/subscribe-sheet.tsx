@@ -3,7 +3,6 @@ import { Button } from "@/components/ui/button";
 import {
   Sheet,
   SheetContent,
-  SheetDescription,
   SheetFooter,
   SheetHeader,
   SheetTitle,
@@ -60,7 +59,6 @@ const SubscribeSheet = ({ open, setOpen, productID }: SubscribeSheetProps) => {
   const { toast } = useToast();
   const isSubscribed = user?.subscriptions?.includes(productID);
   const product = dataProducts?.find((product) => product.id === productID);
-  console.log("USer: ", user);
 
   // Calculate hasSufficientBalance (use in your component logic)
   const hasSufficientBalance =

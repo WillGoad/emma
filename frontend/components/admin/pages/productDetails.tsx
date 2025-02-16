@@ -8,9 +8,7 @@ type ProductDetailsProps = {
 
 const ProductDetails = ({ dataProducts }: ProductDetailsProps) => {
   const params = useParams();
-
-  console.log(dataProducts);
-
+  
   const product = dataProducts?.find(
     (product) => product.id === params.objectId,
   );

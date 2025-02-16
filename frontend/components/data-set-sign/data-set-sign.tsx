@@ -82,7 +82,7 @@ const DataSetCard = ({
         </CardDescription>
       </CardHeader>
       <CardContent>
-        {user ? (
+        {user?.role !== "GUEST" &&
           (product.pricingMode === PricingMode.FREE ||
             (isSubscribed && keyAuth)) && (
             <div className="flex w-full max-w-sm items-center space-x-2">
@@ -103,20 +103,25 @@ const DataSetCard = ({
                 <ClipboardList />
               </Button>
             </div>
-          )
-        ) : (
-          <Link href="/login" legacyBehavior passHref>
-            <Button variant="secondary">Login to get data</Button>
-          </Link>
-        )}
+          )}
       </CardContent>
-      {product.pricingMode !== PricingMode.FREE && (
-        <CardFooter>
-          <button onClick={handleToggleSubscription}>
-            {isSubscribedUI ? "Unsubscribe" : "Subscribe"}
-          </button>
-        </CardFooter>
-      )}
+      <CardFooter>
+        {user?.role === "GUEST" ? (
+          <Link href="/login" legacyBehavior passHref>
+            <Button variant="outline">
+              {product.pricingMode === PricingMode.FREE
+          ? "Login to get data"
+          : "Login to subscribe"}
+            </Button>
+          </Link>
+        ) : (
+          product.pricingMode !== PricingMode.FREE && (
+            <Button variant="default" onClick={handleToggleSubscription}>
+              {isSubscribedUI ? "Unsubscribe" : "Subscribe"}
+            </Button>
+          )
+        )}
+      </CardFooter>
     </Card>
   );
 };

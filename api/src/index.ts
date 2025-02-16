@@ -17,10 +17,15 @@ const app = express();
 const corsOptions = {
   origin: process.env.FRONTEND_URL || process.env.INTERNAL_RENDER_URL || 'localhost:3000', // Allow your frontend URL
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'], // Allowed HTTP methods
-  allowedHeaders: ['Content-Type', 'Authorization'], // Allowed headers
+  allowedHeaders: ['Content-Type', 'Authorization', 'x-access-token'], // Allowed headers
   credentials: true, // Allow cookies and credentials
   optionsSuccessStatus: 200 // Legacy browsers choke on 204
 };
+
+if (process.env.NODE_ENV === 'development') {
+  corsOptions.origin = '*'; // Allow all origins in development
+  corsOptions.credentials = false; 
+}
 
 app.use(cors(corsOptions));
 app.options('*', cors(corsOptions));

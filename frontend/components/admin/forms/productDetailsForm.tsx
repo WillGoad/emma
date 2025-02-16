@@ -71,8 +71,6 @@ interface ProductDetailsFormProps {
 export function ProductDetailsForm({ productData }: ProductDetailsFormProps) {
   const { organisations } = useUserData();
 
-  console.log(productData);
-
   const { toast } = useToast();
 
   // This can come from your database or API.

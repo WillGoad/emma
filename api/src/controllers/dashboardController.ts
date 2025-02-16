@@ -5,11 +5,11 @@ import dotenv from "dotenv";
 import { prisma } from "..";
 import {
   AuthenticatedRequest,
-  DataProductWithKong,
+  DataProductWithOrganization,
   KongDataProductDetails,
   Organisation,
 } from "../utils/types";
-import { DataProductStatus, Prisma } from "@prisma/client";
+import { DataProductStatus } from "@prisma/client";
 
 dotenv.config();
 
@@ -23,38 +23,66 @@ export const getDashboardDataForUser = async (
   res: Response
 ): Promise<void> => {
   try {
+    // Base data structure with safe defaults
+    const baseData = {
+      dataProducts: [] as DataProductWithOrganization[],
+      organizations: [] as Organisation[],
+      keyAuth: null as KeyAuth | null,
+    };
+
+    // Initial fetch for all users
+    const [initialDataProducts, initialOrganizations] = await Promise.all([
+      prisma.dataProduct.findMany({
+        where: { status: DataProductStatus.LIVE },
+        select: {
+          id: true,
+          name: true,
+          accessURL: true,
+          description: true,
+          price: true,
+          pricingMode: true,
+          currency: true,
+          paymentInterval: true,
+          organisationID: true,
+          organisation: {
+            select: { id: true, name: true, logoUrl: true, shortName: true },
+          },
+          Subscriptions: {
+            select: {
+              id: true,
+              userId: true,
+            },
+          },
+        },
+      }),
+      prisma.organisation.findMany({
+        select: { id: true, logoUrl: true, name: true },
+      }),
+    ]);
+
+    baseData.dataProducts = initialDataProducts;
+    baseData.organizations = initialOrganizations;
+
     const { userId } = req;
     if (userId) {
-      // Get user with prisma where object id is mongoId
       const user = await prisma.user.findUnique({ where: { id: userId } });
       if (!user) {
-        res.status(404).send({ message: "User not found" });
+        res.status(404).json({ message: "User not found" });
         return;
       }
 
-      let keyAuth;
+      // Get user API key with graceful failure
       try {
-        keyAuth = await getUserAPIKeyFromKong(userId);
+        baseData.keyAuth = await getUserAPIKeyFromKong(userId);
       } catch (error) {
-        // Handle case where no key exists
-        keyAuth = null;
+        console.error("Failed to fetch user API key from Kong:", error);
+        baseData.keyAuth = null;
       }
 
-      // Base response with API key
-
-      const response: {
-        keyAuth: KeyAuth | null;
-        dataProductsTableData?: DataProductWithKong[];
-        organisationsData?: Organisation[];
-      } = {
-        keyAuth: keyAuth
-          ? { id: keyAuth.id, key: keyAuth.key, ttl: keyAuth.ttl }
-          : null,
-      };
-
-      if (user?.role === "ADMIN") {
-        const [dataProducts, organisations] = await Promise.all([
-          prisma.dataProduct.findMany({
+      if (user.role === "ADMIN") {
+        try {
+          // Get all data products for admin
+          const adminDataProducts = await prisma.dataProduct.findMany({
             select: {
               id: true,
               name: true,
@@ -75,61 +103,35 @@ export const getDashboardDataForUser = async (
                 },
               },
             },
-          }),
-          prisma.organisation.findMany({
-            select: { id: true, logoUrl: true, name: true },
-          }),
-        ]);
+          });
 
-        const productsWithKong = await Promise.all(
-          dataProducts.map(async (product) => ({
-            ...product,
-            kongDetails: product.kongServiceID
-              ? await getAdminDataProductDetailsFromKong(product.kongServiceID)
-              : null,
-          }))
-        );
+          // Enrich with Kong details (graceful per-product failure)
+          const productsWithKong = await Promise.all(
+            adminDataProducts.map(async (product) => ({
+              ...product,
+              kongDetails: product.kongServiceID
+                ? await getAdminDataProductDetailsFromKong(
+                    product.kongServiceID
+                  ).catch((error) => {
+                    console.error(
+                      `Failed to fetch Kong details for product ${product.id}:`,
+                      error
+                    );
+                    return null;
+                  })
+                : null,
+            }))
+          );
 
-        response.dataProductsTableData = productsWithKong;
-        response.organisationsData = organisations;
+          baseData.dataProducts = productsWithKong;
+        } catch (error) {
+          console.error("Failed to fetch admin data products:", error);
+          // Maintain existing LIVE products rather than failing completely
+        }
       }
-
-      res.status(200).json(response);
-    } else {
-      const [dataProducts, organisations] = await Promise.all([
-        prisma.dataProduct.findMany({
-          where: { status: DataProductStatus.LIVE },
-          select: {
-            id: true,
-            name: true,
-            accessURL: true,
-            description: true,
-            price: true,
-            pricingMode: true,
-            currency: true,
-            paymentInterval: true,
-            organisationID: true,
-            organisation: {
-              select: { id: true, name: true, logoUrl: true, shortName: true },
-            },
-            Subscriptions: {
-              select: {
-                id: true,
-                userId: true,
-              },
-            },
-          },
-        }),
-        prisma.organisation.findMany({
-          select: { id: true, logoUrl: true, name: true },
-        }),
-      ]);
-
-      res.status(200).json({
-        dataProductsTableData: dataProducts,
-        organisationsData: organisations,
-      });
     }
+
+    res.status(200).json(baseData);
   } catch (error) {
     console.error("Error:", error);
     res.status(500).send({ message: "Internal server error" });

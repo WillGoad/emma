@@ -5,7 +5,7 @@ import {
   sanitizeKongName,
   sanitizeRoutePath,
 } from "./helpers";
-import { DataProduct, DataProductStatus } from "@prisma/client";
+import { DataProductStatus } from "@prisma/client";
 
 interface KongConsumer {
   id: string;
@@ -408,8 +408,7 @@ export async function addAllUsersToFreeProductACLs(): Promise<void> {
     });
 
     if (freeProducts.length === 0) {
-      console.log("No free data products found");
-      return;
+      throw new Error("No free data products found");
     }
 
     // Process users in batches
