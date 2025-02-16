@@ -2,12 +2,13 @@ import { getCookie } from "cookies-next";
 import { USER_TOKEN } from "../constants";
 import { DataProduct } from "../types";
 import { ProfileFormValues } from "@/components/admin/forms/productDetailsForm";
+import { mutate } from "swr";
 
 type FormDataKeys = keyof ProfileFormValues;
 
 export const updateDataProduct = async (
   productData: DataProduct,
-  formData: ProfileFormValues,
+  formData: ProfileFormValues
 ) => {
   const token = await getCookie(USER_TOKEN);
   if (!token) return;
@@ -29,11 +30,13 @@ export const updateDataProduct = async (
         "Content-Type": "application/json",
       },
       body: JSON.stringify({ ...updatedFields, id: productData.id }),
-    },
+    }
   );
 
   if (!response.ok) {
     throw new Error(`Failed to update product: ${response.statusText}`);
+  } else {
+    mutate("accessible-data");
   }
 
   return response.json();
@@ -55,6 +58,8 @@ export const newDataProduct = async (formData: ProfileFormValues) => {
 
   if (!response.ok) {
     throw new Error(`Failed to update product: ${response.statusText}`);
+  } else {
+    mutate("accessible-data");
   }
 
   return response.json();
