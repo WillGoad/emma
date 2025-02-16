@@ -16,7 +16,7 @@ const convertTableToCsv = (
   ];
 
   // CSV Body (transform dataProducts into arrays)
-  const rows = dashboardData?.dataProductsTableData
+  const rows = dashboardData?.dataProducts
     ?.filter(filterDataProducts)
     ?.map((product: DataProduct) => [
       product.name,
@@ -44,7 +44,7 @@ export const DataProductCSVExport = ({
   filterDataProducts,
   children,
 }: DataProductCSVExportProps) => {
-  if (!dashboardData?.dataProductsTableData) {
+  if (!dashboardData?.dataProducts) {
     return null;
   }
   const csvData = convertTableToCsv(dashboardData, filterDataProducts);
