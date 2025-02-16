@@ -82,26 +82,32 @@ const DataSetCard = ({
         </CardDescription>
       </CardHeader>
       <CardContent>
-        {(product.pricingMode === PricingMode.FREE ||
-          (isSubscribed && keyAuth)) && (
-          <div className="flex w-full max-w-sm items-center space-x-2">
-            <Input
-              type="email"
-              placeholder={`https://data.emmadata.org/${product.organisation.shortName}/${product.accessURL}?apikey=${keyAuth?.key}`}
-              readOnly
-            />
-            <Button
-              type="submit"
-              onClick={() =>
-                copyToClipboard(
-                  `https://data.emmadata.org/${product.organisation.shortName}/${product.accessURL}?apikey=${keyAuth?.key}`,
-                  toast
-                )
-              }
-            >
-              <ClipboardList />
-            </Button>
-          </div>
+        {user ? (
+          (product.pricingMode === PricingMode.FREE ||
+            (isSubscribed && keyAuth)) && (
+            <div className="flex w-full max-w-sm items-center space-x-2">
+              <Input
+                type="email"
+                placeholder={`https://data.emmadata.org/${product.organisation.shortName}/${product.accessURL}?apikey=${keyAuth?.key}`}
+                readOnly
+              />
+              <Button
+                type="submit"
+                onClick={() =>
+                  copyToClipboard(
+                    `https://data.emmadata.org/${product.organisation.shortName}/${product.accessURL}?apikey=${keyAuth?.key}`,
+                    toast
+                  )
+                }
+              >
+                <ClipboardList />
+              </Button>
+            </div>
+          )
+        ) : (
+          <Link href="/login" legacyBehavior passHref>
+            <Button variant="secondary">Login to get data</Button>
+          </Link>
         )}
       </CardContent>
       {product.pricingMode !== PricingMode.FREE && (

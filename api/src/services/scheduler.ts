@@ -23,7 +23,7 @@ export function startScheduler() {
       console.log(`Starting task: ${task.name}`);
       try {
         await task.job();
-        console.log(`Completed task: ${task.name} ${process.env.FRONTEND_URL}`);
+        console.log(`Completed task: ${task.name}`);
       } catch (error) {
         console.error(`Error in task ${task.name}:`, error);
       }
