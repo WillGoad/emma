@@ -17,13 +17,12 @@ import { PageEnum, RouteConfig, UserRole } from "@/lib/types";
 import { roleBasedRoutes } from "@/lib/route-config";
 
 export function UserNav() {
-  const { refreshData: refreshUserData, user } = useUserData();
+  const { user } = useUserData();
 
   const roleRoutes: RouteConfig[] = roleBasedRoutes[user?.role as UserRole];
 
   const handleLogout = () => {
     deleteAllCookies();
-    refreshUserData();
   };
 
   return (

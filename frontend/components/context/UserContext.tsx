@@ -1,5 +1,5 @@
 "use client";
-import React, { createContext, useContext, useEffect } from "react";
+import React, { createContext, useContext } from "react";
 import useSWR from "swr";
 import { accessibleFetcher, userFetcher } from "@/lib/api/swr-fetchers";
 import {
@@ -17,8 +17,6 @@ interface UserContextProps {
   keyAuth: KeyAuth | undefined;
   isLoading: boolean;
   error: Error | null;
-  mutateUser: () => void;
-  mutateAccessible: () => void;
 }
 
 const UserContext = createContext<UserContextProps | undefined>(undefined);
@@ -31,7 +29,6 @@ export const UserProvider: React.FC<{ children: React.ReactNode }> = ({
     data: userData,
     error: userError,
     isLoading: isUserLoading,
-    mutate: mutateUser,
   } = useSWR("user", userFetcher);
 
   // Accessible data SWR hook (depends on user data)
@@ -39,7 +36,6 @@ export const UserProvider: React.FC<{ children: React.ReactNode }> = ({
     data: accessibleData,
     error: accessibleError,
     isLoading: isAccessibleLoading,
-    mutate: mutateAccessible,
   } = useSWR("accessible-data", accessibleFetcher);
 
   // Combined loading state
@@ -50,11 +46,6 @@ export const UserProvider: React.FC<{ children: React.ReactNode }> = ({
   // Determine user object
   const user = userData?.role ? userData : { role: UserRole.GUEST };
 
-  useEffect(() => {
-    mutateAccessible();
-    mutateUser();
-  }, []);
-
   return (
     <UserContext.Provider
       value={{
@@ -64,8 +55,6 @@ export const UserProvider: React.FC<{ children: React.ReactNode }> = ({
         keyAuth: accessibleData?.keyAuth,
         isLoading,
         error,
-        mutateUser,
-        mutateAccessible,
       }}
     >
       {children}
