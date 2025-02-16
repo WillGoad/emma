@@ -20,7 +20,6 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 
 import { setUserCookies } from "@/lib/utils";
 import { useToast } from "@/components/hooks/use-toast";
-import { useUserData } from "@/components/context/UserContext";
 import { mutate } from "swr";
 
 export default function Signin() {

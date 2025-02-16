@@ -15,6 +15,7 @@ import Link from "next/link";
 import { useUserData } from "../context/UserContext";
 import { PageEnum, RouteConfig, UserRole } from "@/lib/types";
 import { roleBasedRoutes } from "@/lib/route-config";
+import { mutate } from "swr";
 
 export function UserNav() {
   const { user } = useUserData();
@@ -23,6 +24,7 @@ export function UserNav() {
 
   const handleLogout = () => {
     deleteAllCookies();
+    mutate("user");
   };
 
   return (
