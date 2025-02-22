@@ -1,10 +1,8 @@
 import jwt from "jsonwebtoken";
-import dotenv from "dotenv";
+import 'dotenv/config';
 import { Response, NextFunction } from "express";
 import { prisma } from "..";
 import { AuthenticatedRequest, EmmaJWTPayload } from "./types";
-
-dotenv.config();
 
 // Middleware to validate JWT
 

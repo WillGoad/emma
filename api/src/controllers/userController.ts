@@ -2,14 +2,22 @@ import { Response } from "express";
 import sgMail from "@sendgrid/mail";
 import jwt from "jsonwebtoken";
 import { prisma } from "..";
-import { AuthenticatedRequest } from "../utils/types";
-import axios from "axios";
-import dotenv from "dotenv";
+import { AuthenticatedRequest, KeyAuth } from "../utils/types";
+import "dotenv/config";
+import bcrypt from "bcrypt";
+import { v4 as uuidv4 } from "uuid";
 import { Subscription, UserRole } from "@prisma/client";
-import { addUserToFreeProducts, addUserToProductACL } from "../utils/kong";
+import {
+  addUserToFreeProducts,
+  addUserToProductACL,
+  createKongConsumer,
+  createUserAPIKeyInKong,
+  deleteUserAPIKeyInKong,
+  getConsumerById,
+  getUserAPIKeyFromKong,
+  rotateUserAPIKey,
+} from "../utils/kong";
 import { calculateEndTime } from "../utils/helpers";
-
-dotenv.config();
 
 export const subscribeUserToDataProduct = async (
   req: AuthenticatedRequest,
@@ -246,10 +254,10 @@ export const getUserDetails = async (
   }
 };
 
-export const createAPIKeyForUser = async (
+export const rotateAPIKeyForUser = async (
   req: AuthenticatedRequest,
   res: Response
-): Promise<void> => {
+): Promise<KeyAuth | undefined> => {
   if (req.userId === undefined) {
     res.status(401).json({ message: "Unauthorized" });
     return;
@@ -257,47 +265,11 @@ export const createAPIKeyForUser = async (
 
   try {
     const userId = req.userId;
-    const { ttl = 60 * 60 * 24 * 30 } = req.body;
+    const { ttl = 60 * 60 * 24 * 30 }: { ttl?: number } = req.body;
 
-    const kongAdminUrlGetConsumer = `${process.env.KONG_ADMIN_URL}/consumers?custom_id=${userId}`; // Replace with your Kong Admin API URL
-    const responseGetConsumer = await axios.get(kongAdminUrlGetConsumer, {
-      headers: {
-        apikey: process.env.KONG_API_KEY,
-      },
-    });
+    const response = await rotateUserAPIKey(userId, ttl);
 
-    const kongId = responseGetConsumer.data.data[0].id;
-
-    if (!kongId) {
-      throw new Error("Kong id not found");
-    }
-
-    const kongAdminUrlGetKeys = `${process.env.KONG_ADMIN_URL}/consumers/${kongId}/key-auth`;
-    const responseGetKeys = await axios.get(kongAdminUrlGetKeys, {
-      headers: {
-        apikey: process.env.KONG_API_KEY,
-      },
-    });
-
-    if (responseGetKeys.data.data.length > 0) {
-      res.status(400).json({ message: "User already has an API key" });
-      return;
-    }
-
-    const kongAdminUrl = `${process.env.KONG_ADMIN_URL}/consumers/${kongId}/key-auth`;
-    const response = await axios.post(
-      kongAdminUrl,
-      {
-        ttl,
-      },
-      {
-        headers: {
-          apikey: process.env.KONG_API_KEY,
-        },
-      }
-    );
-
-    res.status(200).json(response.data);
+    res.status(200).json(response);
   } catch (error) {
     console.error(error);
     res.status(500).json({ message: "Server error" });
@@ -318,27 +290,9 @@ export const deleteAPIKeyForUser = async (
     const userId = req.userId;
     const { keyId } = req.body;
 
-    const kongAdminUrlGetConsumer = `${process.env.KONG_ADMIN_URL}/consumers?custom_id=${userId}`; // Replace with your Kong Admin API URL
-    const responseGetConsumer = await axios.get(kongAdminUrlGetConsumer, {
-      headers: {
-        apikey: process.env.KONG_API_KEY,
-      },
-    });
+    await deleteUserAPIKeyInKong(userId, keyId);
 
-    const kongId = responseGetConsumer.data.data[0].id;
-
-    if (!kongId) {
-      throw new Error("Kong id not found");
-    }
-
-    const kongAdminUrl = `${process.env.KONG_ADMIN_URL}/consumers/${kongId}/key-auth/${keyId}`;
-    const response = await axios.delete(kongAdminUrl, {
-      headers: {
-        apikey: process.env.KONG_API_KEY,
-      },
-    });
-
-    res.status(200).json(response.data);
+    res.status(200).json({ message: "API key deleted successfully" });
   } catch (error) {
     console.error(error);
     res.status(500).json({ message: "Server error" });
@@ -358,27 +312,10 @@ export const getAPIKeysByUser = async (
   try {
     const userId = req.userId;
 
-    const kongAdminUrlGetConsumer = `${process.env.KONG_ADMIN_URL}/consumers?custom_id=${userId}`; // Replace with your Kong Admin API URL
-    const responseGetConsumer = await axios.get(kongAdminUrlGetConsumer, {
-      headers: {
-        apikey: process.env.KONG_API_KEY,
-      },
-    });
+    const consumer = await getConsumerById(userId);
+    const response = await getUserAPIKeyFromKong(consumer.id);
 
-    const kongId = responseGetConsumer.data.data[0].id;
-
-    if (!kongId) {
-      throw new Error("Kong id not found");
-    }
-
-    const kongAdminUrl = `${process.env.KONG_ADMIN_URL}/consumers/${kongId}/key-auth`;
-    const response = await axios.get(kongAdminUrl, {
-      headers: {
-        apikey: process.env.KONG_API_KEY,
-      },
-    });
-
-    res.status(200).json(response.data);
+    res.status(200).json(response);
   } catch (error) {
     console.error(error);
     res.status(500).json({ message: "Server error" });
@@ -407,6 +344,26 @@ const sendVerificationCode = async (email: string, code: string) => {
   }
 };
 
+const sendPasswordReset = async (email: string, token: string) => {
+  if (!process.env.SENDGRID_API_KEY) {
+    return { err: "Sendgrid API key not found." };
+  }
+  sgMail.setApiKey(process.env.SENDGRID_API_KEY);
+  const resetLink = `${process.env.NEXT_PUBLIC_URL}/reset-password?token=${token}`;
+  const msg = {
+    to: email.toLowerCase(),
+    from: "no-reply@emmadata.org", // Change to your verified sender
+    subject: "Emma Data Password Reset",
+    text: `Please use the following link to reset your password: ${resetLink}`,
+    html: `<p>Please use the following link to reset your password:</p><a href="${resetLink}">${resetLink}</a>`,
+  };
+  try {
+    await sgMail.send(msg);
+  } catch (err) {
+    return { err };
+  }
+};
+
 const signToken = (id: string, jwt_secret: string) =>
   jwt.sign({ id }, jwt_secret, {
     algorithm: "HS256",
@@ -416,10 +373,16 @@ const signToken = (id: string, jwt_secret: string) =>
 
 export const signup = async (req: AuthenticatedRequest, res: Response) => {
   try {
-    if (!req.body.userName || !req.body.email) {
+    if (!req.body.userName || !req.body.email || !req.body.password) {
       res.status(400).send({ message: "Missing required fields." });
       return;
     }
+    if (req.body.password.length < 12) {
+      return res
+        .status(400)
+        .send({ message: "Password must be at least 8 characters." });
+    }
+    const hashedPassword = await bcrypt.hash(req.body.password, 10);
     //Check if email is already in use
     const existingUser = await prisma.user.findUnique({
       where: { email: req.body.email.toLowerCase() },
@@ -433,6 +396,7 @@ export const signup = async (req: AuthenticatedRequest, res: Response) => {
         data: {
           userName: req.body.userName,
           email: req.body.email.toLowerCase(),
+          password: hashedPassword,
           role: UserRole.DATA_BUYER,
           subscriptions: {
             connect: [],
@@ -447,19 +411,7 @@ export const signup = async (req: AuthenticatedRequest, res: Response) => {
           emailVerified: false,
         },
       });
-      const kongAdminUrl = `${process.env.KONG_ADMIN_URL}/consumers`; // Replace with your Kong Admin API URL
-      await axios.post(
-        kongAdminUrl,
-        {
-          username: newUser.email.toLowerCase(),
-          custom_id: newUser.id,
-        },
-        {
-          headers: {
-            apikey: process.env.KONG_API_KEY,
-          },
-        }
-      );
+      await createKongConsumer(newUser.id);
       const response = await sendVerificationCode(
         req.body.email.toLowerCase(),
         tempCode
@@ -543,7 +495,7 @@ export const signup = async (req: AuthenticatedRequest, res: Response) => {
 
 export const login = async (req: AuthenticatedRequest, res: Response) => {
   try {
-    if (!req.body.email) {
+    if (!req.body.email || !req.body.password) {
       res.status(400).send({ message: "Missing required fields." });
       return;
     }
@@ -556,6 +508,15 @@ export const login = async (req: AuthenticatedRequest, res: Response) => {
     if (!existingUser) {
       res.status(401).send({ message: "Email not found." });
       return;
+    }
+
+    const passwordValid = await bcrypt.compare(
+      req.body.password,
+      existingUser.password
+    );
+
+    if (!passwordValid) {
+      return res.status(401).send({ message: "Invalid credentials." });
     }
 
     //Send time is less than a minute ago
@@ -604,6 +565,138 @@ export const login = async (req: AuthenticatedRequest, res: Response) => {
 
     res.status(200).send({ message: "Verification code sent!" });
     return;
+  } catch (err) {
+    res.status(500).send({ message: err });
+    return;
+  }
+};
+
+export const sendPasswordResetEmail = async (
+  req: AuthenticatedRequest,
+  res: Response
+) => {
+  try {
+    if (!req.body.email) {
+      res.status(400).send({ message: "Missing required fields." });
+      return;
+    }
+
+    const user = await prisma.user.findUnique({
+      where: { email: req.body.email.toLowerCase() },
+    });
+
+    if (!user) {
+      return res.status(200).send({
+        message: "If an account exists, you'll receive a reset email.",
+      });
+    }
+
+    const resetToken = uuidv4();
+    const expiresAt = new Date(Date.now() + 15 * 60 * 1000); // 15 minutes from now
+
+    await prisma.passwordReset.upsert({
+      where: { userId: user.id },
+      update: { token: resetToken, expiresAt },
+      create: {
+        token: resetToken,
+        expiresAt,
+        user: { connect: { id: user.id } },
+      },
+    });
+
+    await sendPasswordReset(req.body.email.toLowerCase(), resetToken);
+
+    return res.status(200).send({
+      message: "If an account exists, you'll receive a reset email.",
+    });
+  } catch (err) {
+    res.status(500).send({ message: err });
+    return;
+  }
+};
+
+export const resetPassword = async (
+  req: AuthenticatedRequest,
+  res: Response
+) => {
+  try {
+    if (!req.body.email || !req.body.password || !req.body.resetToken) {
+      res.status(400).send({ message: "Missing required fields." });
+      return;
+    }
+    if (req.body.password.length < 12) {
+      return res
+        .status(400)
+        .send({ message: "Password must be at least 8 characters." });
+    }
+
+    //Check if email is already in use
+    const existingUser = await prisma.user.findUnique({
+      where: { email: req.body.email.toLowerCase() },
+      include: { verification: true, passwordReset: true },
+    });
+
+    if (!existingUser) {
+      res.status(401).send({ message: "Email not found." });
+      return;
+    }
+
+    if (
+      !existingUser.passwordReset ||
+      existingUser.passwordReset.expiresAt.getTime() < new Date().getTime() ||
+      existingUser.passwordReset.token !== req.body.resetToken
+    ) {
+      res.status(401).send({ message: "Unauthorised" });
+      return;
+    }
+
+    //Send time is less than a minute ago
+    if (
+      existingUser.verification &&
+      existingUser.verification.sentTime.getTime() >
+        new Date().getTime() - 1000 * 60
+    ) {
+      res.status(425).send({
+        message:
+          "Please wait a minute before requesting another verification code.",
+      });
+      return;
+    }
+
+    const hashedPassword = await bcrypt.hash(req.body.password, 10);
+    const tempCode = String(Math.floor(100000 + Math.random() * 900000));
+    const sendTime = new Date().getTime();
+    const expiryTime = new Date().getTime() + 1000 * 60 * 30; // 30 minutes in ms
+
+    await sendVerificationCode(req.body.email.toLowerCase(), tempCode);
+
+    const existingVerification = await prisma.verification.findUnique({
+      where: { userId: existingUser.id },
+    });
+
+    // If the verification record exists, delete it
+    if (existingVerification) {
+      await prisma.verification.delete({
+        where: { userId: existingUser.id },
+      });
+    }
+
+    await prisma.user.update({
+      where: { id: existingUser.id },
+      data: {
+        password: hashedPassword,
+        verification: {
+          create: {
+            code: tempCode,
+            expiry: new Date(expiryTime),
+            sentTime: new Date(sendTime),
+          },
+        },
+      },
+    });
+    return res.status(200).send({
+      message: "Password reset successfully. Verification code sent!",
+    });
   } catch (err) {
     res.status(500).send({ message: err });
     return;

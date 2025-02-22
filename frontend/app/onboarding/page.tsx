@@ -25,6 +25,7 @@ import { mutate } from "swr";
 export default function Onboarding() {
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
   const [code, setCode] = useState("");
   const [currentTab, setCurrentTab] = useState("email");
   const router = useRouter();
@@ -38,7 +39,7 @@ export default function Onboarding() {
         headers: {
           "Content-Type": "application/json",
         },
-        body: JSON.stringify({ userName: name, email }),
+        body: JSON.stringify({ userName: name, email, password }),
       });
       //If status code 200 then change tab
       if (response.status === 200) {
@@ -97,7 +98,8 @@ export default function Onboarding() {
       email.includes("@") &&
       email.includes(".") &&
       email.length > 5 &&
-      name.length > 1
+      name.length > 1 &&
+      password.length >= 12
     ) {
       onSignup();
     }
@@ -172,6 +174,17 @@ export default function Onboarding() {
                         id="email"
                         value={email}
                         onChange={(e) => setEmail(e.target.value)}
+                      />
+                    </div>
+                    <div className="flex flex-col gap-2 items-start">
+                      <Label className="pl-2" htmlFor="password">
+                        Password
+                      </Label>
+                      <Input
+                        id="password"
+                        type="password"
+                        value={password}
+                        onChange={(e) => setPassword(e.target.value)}
                       />
                     </div>
                   </div>

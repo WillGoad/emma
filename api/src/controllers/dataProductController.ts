@@ -1,10 +1,11 @@
 import { Request, Response } from "express";
 import { prisma } from "..";
-import dotenv from "dotenv";
+import "dotenv/config";
 import {
   AuthenticatedRequest,
   DataProductWithOrganization,
   MappedDataProduct,
+  PrivateDataProductWithOrganization,
 } from "../utils/types";
 import {
   DataProductStatus,
@@ -13,13 +14,10 @@ import {
 } from "@prisma/client";
 import {
   addAllUsersToProductACL,
-  createKongServiceForProduct,
-  deleteKongServiceByID,
+  manageKongService,
   upsertKongService,
 } from "../utils/kong";
 import { isValidCurrency } from "../utils/validation";
-
-dotenv.config();
 
 export const getDataProducts = async (
   req: Request,
@@ -194,30 +192,13 @@ export const createDataProduct = async (
     // Kong integration with error handling
     let kongServiceId: string | undefined;
     try {
-      const result = await createKongServiceForProduct({ product: newProduct });
-      kongServiceId = result.service.id;
-      await prisma.dataProduct.update({
-        where: { id: newProduct.id },
-        data: { kongServiceID: result.service.id },
-      });
+      const upsertResponse = await upsertKongService(newProduct);
+      kongServiceId = upsertResponse.service.id;
     } catch (kongError) {
-      // Check if the Kong service was created
-      if (kongServiceId) {
-        try {
-          // Delete the Kong service if it exists
-          await deleteKongServiceByID(kongServiceId);
-        } catch (deleteError) {
-          console.error("Failed to cleanup Kong service:", deleteError);
-          // Optionally re-throw or handle as needed
-        }
-      }
-
-      // Delete the product from the database
+      if (kongServiceId) await manageKongService("DELETE", kongServiceId);
       await prisma.dataProduct.delete({
         where: { id: newProduct.id },
       });
-
-      // Propagate the error
       throw new Error("Failed to configure API gateway");
     }
 
@@ -273,12 +254,18 @@ export const updateDataProduct = async (
     }
 
     // Validate enum values if provided
-    if (updates.status && !Object.values(DataProductStatus).includes(updates.status)) {
+    if (
+      updates.status &&
+      !Object.values(DataProductStatus).includes(updates.status)
+    ) {
       res.status(400).json({ message: "Invalid status value" });
       return;
     }
 
-    if (updates.pricingMode && !Object.values(PriceStructureMode).includes(updates.pricingMode)) {
+    if (
+      updates.pricingMode &&
+      !Object.values(PriceStructureMode).includes(updates.pricingMode)
+    ) {
       res.status(400).json({ message: "Invalid pricing mode" });
       return;
     }
@@ -304,8 +291,13 @@ export const updateDataProduct = async (
         updates.paymentInterval = null;
       } else {
         // Validate pricing structure for non-free modes
-        if (updates.pricingMode === PriceStructureMode.SUBSCRIPTION && !updates.paymentInterval) {
-          res.status(400).json({ message: "Payment interval required for subscriptions" });
+        if (
+          updates.pricingMode === PriceStructureMode.SUBSCRIPTION &&
+          !updates.paymentInterval
+        ) {
+          res
+            .status(400)
+            .json({ message: "Payment interval required for subscriptions" });
           return;
         }
 
@@ -326,7 +318,7 @@ export const updateDataProduct = async (
     }
 
     // Update the data product
-    let updatedProduct: DataProductWithOrganization;
+    let updatedProduct: PrivateDataProductWithOrganization;
 
     // Kong integration with error handling
     try {
@@ -337,25 +329,31 @@ export const updateDataProduct = async (
       });
       await upsertKongService(updatedProduct);
     } catch (kongError) {
-      console.error("Kong service update failed:", kongError);
       // Revert the product update if Kong fails
       await prisma.dataProduct.update({
         where: { id },
         data: existingProduct,
       });
-      
+
       throw new Error("Failed to update API gateway configuration");
     }
 
     await addAllUsersToProductACL(updatedProduct.id);
 
-    res.status(200).json({ message: "Data product updated successfully", data: updatedProduct });
+    res
+      .status(200)
+      .json({
+        message: "Data product updated successfully",
+        data: updatedProduct,
+      });
   } catch (error) {
     console.error("Data product update error:", error);
     const message = error instanceof Error ? error.message : "Update failed";
-    const statusCode = message.includes("permission") ? 403 
-                     : message.includes("not found") ? 404 
-                     : 500;
+    const statusCode = message.includes("permission")
+      ? 403
+      : message.includes("not found")
+        ? 404
+        : 500;
     res.status(statusCode).json({ message });
   }
 };

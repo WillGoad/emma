@@ -53,7 +53,7 @@ export const createAPIKey = async (ttl: number = 60 * 60 * 24 * 30) => {
     const accessToken = await getCookie(USER_TOKEN);
     if (!accessToken) return;
     const response = await fetch(
-      `${process.env.NEXT_PUBLIC_API_URL}/user/create-api-key`,
+      `${process.env.NEXT_PUBLIC_API_URL}/user/rotate-api-key`,
       {
         method: "POST",
         headers: {
