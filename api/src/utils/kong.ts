@@ -1,7 +1,11 @@
 import axios from "axios";
 import { prisma } from "..";
 import { sanitizeKongName, sanitizeRoutePath } from "./helpers";
-import { DataProductWithOrganization, KeyAuth, KongDataProductDetails, PrivateDataProductWithOrganization } from "./types";
+import {
+  KeyAuth,
+  KongDataProductDetails,
+  PrivateDataProductWithOrganization,
+} from "./types";
 
 interface KongConsumer {
   id: string;
@@ -12,6 +16,40 @@ interface KongConsumer {
 interface KeyAuthResponse {
   data: KeyAuth[];
 }
+
+interface CircuitBreaker {
+  isOpen: boolean;
+  lastTripped: number;
+  cooldown: number;
+}
+
+const kongCircuitBreaker: CircuitBreaker = {
+  isOpen: false,
+  lastTripped: 0,
+  cooldown: 30 * 1000,
+};
+
+const checkCircuitBreaker = (): boolean => {
+  if (!kongCircuitBreaker.isOpen) return true;
+
+  const now = Date.now();
+  if (now - kongCircuitBreaker.lastTripped >= kongCircuitBreaker.cooldown) {
+    kongCircuitBreaker.isOpen = false; // Reset after cooldown
+    return true; // Allow one attempt
+  }
+  return false;
+};
+
+const handleCircuitBreakerState = (error: unknown): void => {
+  const isServerError =
+    axios.isAxiosError(error) &&
+    (!error.response || error.response.status >= 500);
+
+  if (isServerError || !(error instanceof Error)) {
+    kongCircuitBreaker.isOpen = true;
+    kongCircuitBreaker.lastTripped = Date.now();
+  }
+};
 
 const BATCH_SIZE = 100;
 
@@ -44,6 +82,7 @@ const validateKongConfig = () => {
 // ----------------------------
 const fetchKongConsumerByCustomId = async (userId: string) => {
   const { KONG_ADMIN_URL, KONG_HEADERS } = validateKongConfig();
+  if (!checkCircuitBreaker()) return;
   const response = await axios.get(`${KONG_ADMIN_URL}/consumers`, {
     params: { custom_id: userId },
     headers: KONG_HEADERS,
@@ -53,6 +92,7 @@ const fetchKongConsumerByCustomId = async (userId: string) => {
 
 export const createKongConsumer = async (userId: string) => {
   const { KONG_ADMIN_URL, KONG_HEADERS } = validateKongConfig();
+  if (!checkCircuitBreaker()) return;
   const response = await axios.post(
     `${KONG_ADMIN_URL}/consumers`,
     {
@@ -70,6 +110,7 @@ const manageKongACL = async (
   method: "POST" | "DELETE"
 ) => {
   const { KONG_ADMIN_URL, KONG_HEADERS } = validateKongConfig();
+  if (!checkCircuitBreaker()) return;
   const url = `${KONG_ADMIN_URL}/consumers/${consumerId}/acls`;
 
   if (method === "DELETE") {
@@ -89,6 +130,7 @@ export const manageKongService = async (
   serviceId?: string,
   data?: any
 ) => {
+  if (!checkCircuitBreaker()) return;
   if (
     !serviceId?.trim() &&
     (method === "PATCH" || method === "DELETE" || method === "GET")
@@ -120,6 +162,7 @@ export const manageKongService = async (
 
 const fetchRoutesForService = async (serviceId: string) => {
   const { KONG_ADMIN_URL, KONG_HEADERS } = validateKongConfig();
+  if (!checkCircuitBreaker()) return null;
   try {
     const response = await axios.get(
       `${KONG_ADMIN_URL}/services/${serviceId}/routes`,
@@ -132,6 +175,7 @@ const fetchRoutesForService = async (serviceId: string) => {
 };
 
 const createKongRoute = async (routeData: any) => {
+  if (!checkCircuitBreaker()) return;
   const { KONG_ADMIN_URL, KONG_HEADERS } = validateKongConfig();
   const response = await axios.post(`${KONG_ADMIN_URL}/routes`, routeData, {
     headers: KONG_HEADERS,
@@ -140,6 +184,7 @@ const createKongRoute = async (routeData: any) => {
 };
 
 const updateKongRoute = async (routeId: string, routeData: any) => {
+  if (!checkCircuitBreaker()) return;
   const { KONG_ADMIN_URL, KONG_HEADERS } = validateKongConfig();
   const response = await axios.patch(
     `${KONG_ADMIN_URL}/routes/${routeId}`,
@@ -157,6 +202,7 @@ const manageKeyAuth = async (
   keyId?: string,
   data?: any
 ) => {
+  if (!checkCircuitBreaker()) return;
   const { KONG_ADMIN_URL, KONG_HEADERS } = validateKongConfig();
   const baseUrl = `${KONG_ADMIN_URL}/consumers/${consumerId}/key-auth`;
   const url = keyId ? `${baseUrl}/${keyId}` : baseUrl;
@@ -421,11 +467,11 @@ export const rotateUserAPIKey = async (userId: string, ttl?: number) => {
   try {
     const consumer = await getConsumerById(userId);
     const existingKey = await getUserAPIKeyFromKong(consumer.id);
-    
+
     if (existingKey) {
       await manageKeyAuth(consumer.id, "DELETE", existingKey.id);
     }
-    
+
     return manageKeyAuth(consumer.id, "POST", undefined, { ttl });
   } catch (error) {
     throw handleKongError(error, "API key rotation failed");
@@ -436,6 +482,7 @@ export const rotateUserAPIKey = async (userId: string, ttl?: number) => {
 // Error Handling Utilities
 // ----------------------------
 const handleKongError = (error: unknown, defaultMessage: string): Error => {
+  handleCircuitBreakerState(error);
   if (axios.isAxiosError(error)) {
     const message = error.response?.data?.message || error.message;
     return new Error(`${defaultMessage}: ${message}`);
