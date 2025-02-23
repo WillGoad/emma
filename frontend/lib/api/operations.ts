@@ -26,7 +26,7 @@ export const updateDataProduct = async (
     {
       method: "POST",
       headers: {
-        "x-access-token": token,
+        Authorization: `Bearer ${token}`,
         "Content-Type": "application/json",
       },
       body: JSON.stringify({ ...updatedFields, id: productData.id }),
@@ -50,7 +50,7 @@ export const newDataProduct = async (formData: ProfileFormValues) => {
   const response = await fetch(`${apiUrl}/data-products/create`, {
     method: "POST",
     headers: {
-      "x-access-token": token,
+      Authorization: `Bearer ${token}`,
       "Content-Type": "application/json",
     },
     body: JSON.stringify({ ...formData }),

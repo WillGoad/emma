@@ -4,6 +4,7 @@ import {
   deleteAPIKeyForUser,
   getAPIKeysByUser,
   getUserDetails,
+  getDashboardDataForUser,
   login,
   resetPassword,
   rotateAPIKeyForUser,
@@ -27,6 +28,7 @@ router.post(
   unsubscribeUserFromDataProduct
 );
 router.post("/get-user-details", checkJwt, getUserDetails);
+router.get("/get-dashboard-data", checkJwt, getDashboardDataForUser);
 router.post("/rotate-api-key", checkJwt, rotateAPIKeyForUser);
 router.post("/delete-api-key", checkJwt, deleteAPIKeyForUser);
 router.post("/get-api-key", checkJwt, getAPIKeysByUser);

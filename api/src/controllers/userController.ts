@@ -1,21 +1,26 @@
-import { Response } from "express";
+import { Request, Response } from "express";
 import sgMail from "@sendgrid/mail";
 import jwt from "jsonwebtoken";
 import { prisma } from "..";
-import { AuthenticatedRequest, KeyAuth } from "../utils/types";
+import {
+  AuthenticatedRequest,
+  KeyAuth,
+  DataProductWithOrganization,
+  Organisation,
+} from "../utils/types";
 import "dotenv/config";
 import bcrypt from "bcrypt";
 import { v4 as uuidv4 } from "uuid";
-import { Subscription, UserRole } from "@prisma/client";
+import { Subscription, UserRole, DataProductStatus } from "@prisma/client";
 import {
   addUserToFreeProducts,
   addUserToProductACL,
   createKongConsumer,
-  createUserAPIKeyInKong,
   deleteUserAPIKeyInKong,
   getConsumerById,
   getUserAPIKeyFromKong,
   rotateUserAPIKey,
+  getAdminDataProductDetailsFromKong,
 } from "../utils/kong";
 import { calculateEndTime } from "../utils/helpers";
 
@@ -23,13 +28,13 @@ export const subscribeUserToDataProduct = async (
   req: AuthenticatedRequest,
   res: Response
 ): Promise<void> => {
-  if (!req.userId) {
+  if (!req.user || req.user.role !== UserRole.DATA_BUYER) {
     res.status(401).json({ message: "Unauthorized" });
     return;
   }
 
   try {
-    const userId = req.userId;
+    const userId = req.user.id;
     const { productId } = req.body;
 
     // Validate productId format
@@ -142,13 +147,13 @@ export const unsubscribeUserFromDataProduct = async (
   req: AuthenticatedRequest,
   res: Response
 ): Promise<void> => {
-  if (!req.userId) {
+  if (!req.user || req.user.role !== UserRole.DATA_BUYER) {
     res.status(401).json({ message: "Unauthorized" });
     return;
   }
 
   try {
-    const userId = req.userId;
+    const userId = req.user.id;
     const { productId } = req.body;
 
     // Validate productId format
@@ -218,33 +223,29 @@ export const getUserDetails = async (
   req: AuthenticatedRequest,
   res: Response
 ): Promise<void> => {
-  if (req.userId === undefined) {
-    res.status(401).json({ message: "Unauthorized" });
-    return;
-  }
-
   try {
-    const userId = req.userId; // Extract user.sub from validated JWT
-
-    const user = await prisma.user.findUnique({
-      where: { id: userId },
-      include: { subscriptions: true, balances: true }, // Include subscriptions in the user object
-    });
-
-    if (!user) {
-      res.status(404).json({ message: "User not found" });
-      return;
-    }
-
-    let userDetails;
-
-    userDetails = {
-      userName: user.userName,
-      email: user.email,
-      role: user.role,
-      balances: user.balances,
-      subscriptions: user.subscriptions.map((sub: Subscription) => sub.id),
+    let userDetails: any = {
+      role: UserRole.GUEST,
     };
+    if (req.user && req.user.role !== UserRole.GUEST) {
+      const userId = req.user.id;
+
+      const user = await prisma.user.findUnique({
+        where: { id: userId },
+        include: { subscriptions: true, balances: true }, // Include subscriptions in the user object
+      });
+
+      if (user) {
+        userDetails = null;
+        userDetails = {
+          userName: user.userName,
+          email: user.email,
+          role: user.role,
+          balances: user.balances,
+          subscriptions: user.subscriptions.map((sub: Subscription) => sub.id),
+        };
+      }
+    }
 
     res.status(200).json(userDetails);
   } catch (error) {
@@ -254,17 +255,138 @@ export const getUserDetails = async (
   }
 };
 
+export const getDashboardDataForUser = async (
+  req: AuthenticatedRequest,
+  res: Response
+): Promise<void> => {
+  try {
+    // Base data structure with safe defaults
+    const baseData = {
+      dataProducts: [] as DataProductWithOrganization[],
+      organizations: [] as Organisation[],
+      keyAuth: null as KeyAuth | null,
+    };
+
+    // Initial fetch for all users
+    const [initialDataProducts, initialOrganizations] = await Promise.all([
+      prisma.dataProduct.findMany({
+        where: { status: DataProductStatus.LIVE },
+        select: {
+          id: true,
+          name: true,
+          accessURL: true,
+          description: true,
+          price: true,
+          pricingMode: true,
+          currency: true,
+          paymentInterval: true,
+          organisationID: true,
+          organisation: {
+            select: { id: true, name: true, logoUrl: true, shortName: true },
+          },
+          Subscriptions: {
+            select: {
+              id: true,
+              userId: true,
+            },
+          },
+        },
+      }),
+      prisma.organisation.findMany({
+        select: { id: true, logoUrl: true, name: true },
+      }),
+    ]);
+
+    baseData.dataProducts = initialDataProducts;
+    baseData.organizations = initialOrganizations;
+
+    if (req.user && req.user.role !== UserRole.GUEST) {
+      const userId = req.user.id;
+      const user = await prisma.user.findUnique({ where: { id: userId } });
+      if (!user) {
+        res.status(404).json({ message: "User not found" });
+        return;
+      }
+
+      // Get user API key with graceful failure
+      try {
+        const consumer = await getConsumerById(userId);
+        baseData.keyAuth = await getUserAPIKeyFromKong(consumer.id);
+      } catch (error) {
+        console.error("Failed to fetch user API key from Kong:", error);
+        baseData.keyAuth = null;
+      }
+
+      if (user.role === "ADMIN") {
+        try {
+          // Get all data products for admin
+          const adminDataProducts = await prisma.dataProduct.findMany({
+            select: {
+              id: true,
+              name: true,
+              description: true,
+              accessURL: true,
+              kongServiceID: true,
+              price: true,
+              pricingMode: true,
+              currency: true,
+              paymentInterval: true,
+              organisationID: true,
+              organisation: {
+                select: {
+                  id: true,
+                  name: true,
+                  logoUrl: true,
+                  shortName: true,
+                },
+              },
+            },
+          });
+
+          // Enrich with Kong details (graceful per-product failure)
+          const productsWithKong = await Promise.all(
+            adminDataProducts.map(async (product) => ({
+              ...product,
+              kongDetails: product.kongServiceID
+                ? await getAdminDataProductDetailsFromKong(
+                    product.kongServiceID
+                  ).catch((error) => {
+                    console.error(
+                      `Failed to fetch Kong details for product ${product.id}:`,
+                      error
+                    );
+                    return null;
+                  })
+                : null,
+            }))
+          );
+
+          baseData.dataProducts = productsWithKong;
+        } catch (error) {
+          console.error("Failed to fetch admin data products:", error);
+          // Maintain existing LIVE products rather than failing completely
+        }
+      }
+    }
+
+    res.status(200).json(baseData);
+  } catch (error) {
+    console.error("Error:", error);
+    res.status(500).send({ message: "Internal server error" });
+  }
+};
+
 export const rotateAPIKeyForUser = async (
   req: AuthenticatedRequest,
   res: Response
 ): Promise<KeyAuth | undefined> => {
-  if (req.userId === undefined) {
+  if (!req.user || req.user.role !== UserRole.DATA_BUYER) {
     res.status(401).json({ message: "Unauthorized" });
     return;
   }
 
   try {
-    const userId = req.userId;
+    const userId = req.user.id;
     const { ttl = 60 * 60 * 24 * 30 }: { ttl?: number } = req.body;
 
     const response = await rotateUserAPIKey(userId, ttl);
@@ -281,13 +403,13 @@ export const deleteAPIKeyForUser = async (
   req: AuthenticatedRequest,
   res: Response
 ): Promise<void> => {
-  if (req.userId === undefined) {
+  if (!req.user || req.user.role !== UserRole.DATA_BUYER) {
     res.status(401).json({ message: "Unauthorized" });
     return;
   }
 
   try {
-    const userId = req.userId;
+    const userId = req.user.id;
     const { keyId } = req.body;
 
     await deleteUserAPIKeyInKong(userId, keyId);
@@ -304,13 +426,13 @@ export const getAPIKeysByUser = async (
   req: AuthenticatedRequest,
   res: Response
 ): Promise<void> => {
-  if (req.userId === undefined) {
+  if (!req.user || req.user.role !== UserRole.DATA_BUYER) {
     res.status(401).json({ message: "Unauthorized" });
     return;
   }
 
   try {
-    const userId = req.userId;
+    const userId = req.user.id;
 
     const consumer = await getConsumerById(userId);
     const response = await getUserAPIKeyFromKong(consumer.id);
@@ -371,7 +493,7 @@ const signToken = (id: string, jwt_secret: string) =>
     expiresIn: 60 * 60 * 24, // 24 hours
   });
 
-export const signup = async (req: AuthenticatedRequest, res: Response) => {
+export const signup = async (req: Request, res: Response) => {
   try {
     if (!req.body.userName || !req.body.email || !req.body.password) {
       res.status(400).send({ message: "Missing required fields." });
@@ -493,7 +615,7 @@ export const signup = async (req: AuthenticatedRequest, res: Response) => {
   }
 };
 
-export const login = async (req: AuthenticatedRequest, res: Response) => {
+export const login = async (req: Request, res: Response) => {
   try {
     if (!req.body.email || !req.body.password) {
       res.status(400).send({ message: "Missing required fields." });
@@ -571,10 +693,7 @@ export const login = async (req: AuthenticatedRequest, res: Response) => {
   }
 };
 
-export const sendPasswordResetEmail = async (
-  req: AuthenticatedRequest,
-  res: Response
-) => {
+export const sendPasswordResetEmail = async (req: Request, res: Response) => {
   try {
     if (!req.body.email) {
       res.status(400).send({ message: "Missing required fields." });
@@ -615,10 +734,7 @@ export const sendPasswordResetEmail = async (
   }
 };
 
-export const resetPassword = async (
-  req: AuthenticatedRequest,
-  res: Response
-) => {
+export const resetPassword = async (req: Request, res: Response) => {
   try {
     if (!req.body.email || !req.body.password || !req.body.resetToken) {
       res.status(400).send({ message: "Missing required fields." });
@@ -703,10 +819,7 @@ export const resetPassword = async (
   }
 };
 
-export const verifyAccount = async (
-  req: AuthenticatedRequest,
-  res: Response
-) => {
+export const verifyAccount = async (req: Request, res: Response) => {
   try {
     // If code or email missing in body
     if (!req.body.email || !req.body.code) {

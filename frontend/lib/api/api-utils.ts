@@ -10,7 +10,7 @@ export const handleSubscribe = async (objectID: string) => {
     {
       method: "POST",
       headers: {
-        "x-access-token": token,
+        Authorization: `Bearer ${token}`,
         "Content-Type": "application/json",
       },
       body: JSON.stringify({
@@ -33,7 +33,7 @@ export const handleUnsubscribe = async (objectID: string) => {
     {
       method: "POST",
       headers: {
-        "x-access-token": token,
+        Authorization: `Bearer ${token}`,
         "Content-Type": "application/json",
       },
       body: JSON.stringify({
@@ -57,7 +57,7 @@ export const createAPIKey = async (ttl: number = 60 * 60 * 24 * 30) => {
       {
         method: "POST",
         headers: {
-          "x-access-token": accessToken,
+          Authorization: `Bearer ${accessToken}`,
           "Content-Type": "application/json",
         },
         body: JSON.stringify({
@@ -88,7 +88,7 @@ export const revokeAPIKey = async (keyId: string) => {
       {
         method: "POST",
         headers: {
-          "x-access-token": accessToken,
+          Authorization: `Bearer ${accessToken}`,
           "Content-Type": "application/json",
         },
         body: JSON.stringify({

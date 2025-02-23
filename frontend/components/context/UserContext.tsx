@@ -7,7 +7,6 @@ import {
   KeyAuth,
   Organization,
   UserData,
-  UserRole,
 } from "@/lib/types";
 
 interface UserContextProps {
@@ -36,20 +35,15 @@ export const UserProvider: React.FC<{ children: React.ReactNode }> = ({
     data: accessibleData,
     error: accessibleError,
     isLoading: isAccessibleLoading,
-  } = useSWR("accessible-data", accessibleFetcher);
+  } = useSWR(userData ? "accessible-data" : null, accessibleFetcher);
 
-  // Combined loading state
   const isLoading = isUserLoading || isAccessibleLoading;
-  // Combined error state
   const error = userError || accessibleError || null;
-
-  // Determine user object
-  const user = userData?.role ? userData : { role: UserRole.GUEST };
 
   return (
     <UserContext.Provider
       value={{
-        user,
+        user: userData,
         dataProducts: accessibleData?.dataProducts,
         organisations: accessibleData?.organizations,
         keyAuth: accessibleData?.keyAuth,

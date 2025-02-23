@@ -1,8 +1,15 @@
 import { Prisma } from "@prisma/client";
 import { Request } from "express";
 
+type PrismaUser = Prisma.UserGetPayload<{}>;
+
+// 2. Create a discriminated union type
+type AuthUser =
+  | ({ role: Exclude<PrismaUser['role'], 'GUEST'> } & PrismaUser) // Authenticated case
+  | { role: 'GUEST' }; // Guest case
+
 export interface AuthenticatedRequest extends Request {
-  userId?: string;
+  user: AuthUser;
 }
 
 export interface EmmaJWTPayload {

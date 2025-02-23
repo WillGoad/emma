@@ -23,7 +23,7 @@ interface CircuitBreaker {
   cooldown: number;
 }
 
-const kongCircuitBreaker: CircuitBreaker = {
+export const kongCircuitBreaker: CircuitBreaker = {
   isOpen: false,
   lastTripped: 0,
   cooldown: 30 * 1000,
@@ -41,11 +41,12 @@ const checkCircuitBreaker = (): boolean => {
 };
 
 const handleCircuitBreakerState = (error: unknown): void => {
-  const isServerError =
-    axios.isAxiosError(error) &&
-    (!error.response || error.response.status >= 500);
+  const isNetworkError = axios.isAxiosError(error) && !error.response;
 
-  if (isServerError || !(error instanceof Error)) {
+  const isServerError =
+    axios.isAxiosError(error) && error.response && error.response.status >= 500;
+
+  if (isNetworkError || isServerError || !(error instanceof Error)) {
     kongCircuitBreaker.isOpen = true;
     kongCircuitBreaker.lastTripped = Date.now();
   }
@@ -72,7 +73,7 @@ const validateKongConfig = () => {
   }
   const KONG_HEADERS = {
     "Content-Type": "application/json",
-    apikey: process.env.KONG_API_KEY as string,
+    apikey: KONG_API_KEY as string,
   };
   return { KONG_ADMIN_URL, KONG_HEADERS };
 };
@@ -83,25 +84,35 @@ const validateKongConfig = () => {
 const fetchKongConsumerByCustomId = async (userId: string) => {
   const { KONG_ADMIN_URL, KONG_HEADERS } = validateKongConfig();
   if (!checkCircuitBreaker()) return;
-  const response = await axios.get(`${KONG_ADMIN_URL}/consumers`, {
-    params: { custom_id: userId },
-    headers: KONG_HEADERS,
-  });
-  return response.data.data;
+  try {
+    const response = await axios.get(`${KONG_ADMIN_URL}/consumers`, {
+      params: { custom_id: userId },
+      headers: KONG_HEADERS,
+    });
+    return response.data.data;
+  } catch (error) {
+    handleCircuitBreakerState(error);
+    handleKongError(error, "Kong admin API usage failed");
+  }
 };
 
 export const createKongConsumer = async (userId: string) => {
   const { KONG_ADMIN_URL, KONG_HEADERS } = validateKongConfig();
   if (!checkCircuitBreaker()) return;
-  const response = await axios.post(
-    `${KONG_ADMIN_URL}/consumers`,
-    {
-      username: `user_${userId}`,
-      custom_id: userId,
-    },
-    { headers: KONG_HEADERS }
-  );
-  return response.data;
+  try {
+    const response = await axios.post(
+      `${KONG_ADMIN_URL}/consumers`,
+      {
+        username: `user_${userId}`,
+        custom_id: userId,
+      },
+      { headers: KONG_HEADERS }
+    );
+    return response.data;
+  } catch (error) {
+    handleCircuitBreakerState(error);
+    handleKongError(error, "Kong admin API usage failed");
+  }
 };
 
 const manageKongACL = async (
@@ -111,17 +122,22 @@ const manageKongACL = async (
 ) => {
   const { KONG_ADMIN_URL, KONG_HEADERS } = validateKongConfig();
   if (!checkCircuitBreaker()) return;
-  const url = `${KONG_ADMIN_URL}/consumers/${consumerId}/acls`;
+  try {
+    const url = `${KONG_ADMIN_URL}/consumers/${consumerId}/acls`;
 
-  if (method === "DELETE") {
-    const aclResponse = await axios.get(url, { headers: KONG_HEADERS });
-    const targetACL = aclResponse.data.data.find(
-      (acl: any) => acl.group === group
-    );
-    if (!targetACL) return;
-    await axios.delete(`${url}/${targetACL.id}`, { headers: KONG_HEADERS });
-  } else {
-    await axios.post(url, { group }, { headers: KONG_HEADERS });
+    if (method === "DELETE") {
+      const aclResponse = await axios.get(url, { headers: KONG_HEADERS });
+      const targetACL = aclResponse.data.data.find(
+        (acl: any) => acl.group === group
+      );
+      if (!targetACL) return;
+      await axios.delete(`${url}/${targetACL.id}`, { headers: KONG_HEADERS });
+    } else {
+      await axios.post(url, { group }, { headers: KONG_HEADERS });
+    }
+  } catch (error) {
+    handleCircuitBreakerState(error);
+    handleKongError(error, "Kong admin API usage failed");
   }
 };
 
@@ -156,7 +172,8 @@ export const manageKongService = async (
         return;
     }
   } catch (error) {
-    throw handleKongError(error, "Failed to manage Kong service");
+    handleCircuitBreakerState(error);
+    handleKongError(error, "Kong admin API usage failed");
   }
 };
 
@@ -170,6 +187,7 @@ const fetchRoutesForService = async (serviceId: string) => {
     );
     return response.data.data;
   } catch (error) {
+    handleCircuitBreakerState(error);
     return null;
   }
 };
@@ -177,23 +195,33 @@ const fetchRoutesForService = async (serviceId: string) => {
 const createKongRoute = async (routeData: any) => {
   if (!checkCircuitBreaker()) return;
   const { KONG_ADMIN_URL, KONG_HEADERS } = validateKongConfig();
-  const response = await axios.post(`${KONG_ADMIN_URL}/routes`, routeData, {
-    headers: KONG_HEADERS,
-  });
-  return response.data;
+  try {
+    const response = await axios.post(`${KONG_ADMIN_URL}/routes`, routeData, {
+      headers: KONG_HEADERS,
+    });
+    return response.data;
+  } catch (error) {
+    handleCircuitBreakerState(error);
+    handleKongError(error, "Kong admin API usage failed");
+  }
 };
 
 const updateKongRoute = async (routeId: string, routeData: any) => {
   if (!checkCircuitBreaker()) return;
   const { KONG_ADMIN_URL, KONG_HEADERS } = validateKongConfig();
-  const response = await axios.patch(
-    `${KONG_ADMIN_URL}/routes/${routeId}`,
-    routeData,
-    {
-      headers: KONG_HEADERS,
-    }
-  );
-  return response.data;
+  try {
+    const response = await axios.patch(
+      `${KONG_ADMIN_URL}/routes/${routeId}`,
+      routeData,
+      {
+        headers: KONG_HEADERS,
+      }
+    );
+    return response.data;
+  } catch (error) {
+    handleCircuitBreakerState(error);
+    handleKongError(error, "Kong admin API usage failed");
+  }
 };
 
 const manageKeyAuth = async (
@@ -204,19 +232,25 @@ const manageKeyAuth = async (
 ) => {
   if (!checkCircuitBreaker()) return;
   const { KONG_ADMIN_URL, KONG_HEADERS } = validateKongConfig();
-  const baseUrl = `${KONG_ADMIN_URL}/consumers/${consumerId}/key-auth`;
-  const url = keyId ? `${baseUrl}/${keyId}` : baseUrl;
+  try {
+    const baseUrl = `${KONG_ADMIN_URL}/consumers/${consumerId}/key-auth`;
+    const url = keyId ? `${baseUrl}/${keyId}` : baseUrl;
 
-  switch (method) {
-    case "GET":
-      return (await axios.get<KeyAuthResponse>(url, { headers: KONG_HEADERS }))
-        .data.data;
-    case "POST":
-      return (await axios.post<KeyAuth>(url, data, { headers: KONG_HEADERS }))
-        .data;
-    case "DELETE":
-      await axios.delete(url, { headers: KONG_HEADERS });
-      return;
+    switch (method) {
+      case "GET":
+        return (
+          await axios.get<KeyAuthResponse>(url, { headers: KONG_HEADERS })
+        ).data.data;
+      case "POST":
+        return (await axios.post<KeyAuth>(url, data, { headers: KONG_HEADERS }))
+          .data;
+      case "DELETE":
+        await axios.delete(url, { headers: KONG_HEADERS });
+        return;
+    }
+  } catch (error) {
+    handleCircuitBreakerState(error);
+    handleKongError(error, "Kong admin API usage failed");
   }
 };
 
@@ -261,7 +295,6 @@ export const getConsumerById = async (
   userId: string
 ): Promise<KongConsumer> => {
   const consumers = await fetchKongConsumerByCustomId(userId);
-
   if (!consumers?.length) {
     throw new Error(`No Kong consumer found for user ID: ${userId}`);
   }
@@ -482,7 +515,6 @@ export const rotateUserAPIKey = async (userId: string, ttl?: number) => {
 // Error Handling Utilities
 // ----------------------------
 const handleKongError = (error: unknown, defaultMessage: string): Error => {
-  handleCircuitBreakerState(error);
   if (axios.isAxiosError(error)) {
     const message = error.response?.data?.message || error.message;
     return new Error(`${defaultMessage}: ${message}`);

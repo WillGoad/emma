@@ -76,19 +76,8 @@ export const createDataProduct = async (
 ): Promise<void> => {
   try {
     // Authorization check
-    if (!req.userId) {
+    if (req.user.role !== UserRole.ADMIN) {
       res.status(401).json({ message: "Unauthorized" });
-      return;
-    }
-
-    // Permission validation
-    const currentUser = await prisma.user.findUnique({
-      where: { id: req.userId },
-      select: { role: true },
-    });
-
-    if (currentUser?.role !== UserRole.ADMIN) {
-      res.status(403).json({ message: "Insufficient permissions" });
       return;
     }
 
@@ -218,20 +207,8 @@ export const updateDataProduct = async (
   res: Response
 ): Promise<void> => {
   try {
-    // Authorization check
-    if (!req.userId) {
+    if (req.user.role !== UserRole.ADMIN) {
       res.status(401).json({ message: "Unauthorized" });
-      return;
-    }
-
-    // Permission validation
-    const currentUser = await prisma.user.findUnique({
-      where: { id: req.userId },
-      select: { role: true },
-    });
-
-    if (currentUser?.role !== UserRole.ADMIN) {
-      res.status(403).json({ message: "Insufficient permissions" });
       return;
     }
 
