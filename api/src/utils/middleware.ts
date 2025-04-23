@@ -1,51 +1,49 @@
 import jwt from "jsonwebtoken";
-import dotenv from "dotenv";
-import { Response, NextFunction } from "express";
+import "dotenv/config";
+import { NextFunction, Response } from "express";
 import { prisma } from "..";
 import { AuthenticatedRequest, EmmaJWTPayload } from "./types";
-
-dotenv.config();
+import { UserRole } from "@prisma/client";
 
 // Middleware to validate JWT
 
 export const checkJwt = async (
   req: AuthenticatedRequest,
-  res: Response,
-  next: NextFunction,
+  next: NextFunction
 ) => {
-  let token: string = req.headers["x-access-token"] as string;
-  if (!token) {
-    req.userId = undefined; // Mark user as unauthenticated
-    return next();
-  }
-  try {
-    const secret = process.env.JWT_SECRET;
-    if (!secret) {
-      return res
-        .status(500)
-        .send({ ok: false, message: "JWT secret is not defined!" });
-    }
-    const decoded = jwt.verify(token, secret) as unknown as EmmaJWTPayload;
+  // Default to guest user
+  req.user = { role: UserRole.GUEST };
 
+  try {
+    // 1. Extract token from Authorization header
+    const token = req.headers.authorization?.split("Bearer ")[1];
+
+    // 2. Exit early if no token
+    if (!token) return;
+
+    // 3. Verify JWT configuration
+    const secret = process.env.JWT_SECRET;
+    if (!secret) throw new Error("Missing JWT_SECRET in environment");
+
+    // 4. Verify and decode token
+    const decoded = jwt.verify(token, secret) as EmmaJWTPayload;
+
+    // 5. Find associated user
     const user = await prisma.user.findUnique({
       where: { id: decoded.id },
     });
-    if (!user) {
-      return res.status(401).send({ ok: false, message: "Unauthorized!" });
-    }
-    req.userId = decoded.id;
-    next();
-  } catch (err) {
-    if (err instanceof jwt.TokenExpiredError) {
-      return res.status(401).send({
-        ok: false,
-        message: "TokenExpired",
-      });
-    }
 
-    return res.status(401).send({
-      ok: false,
-      message: "Unauthorized!",
-    });
+    // 6. Attach user if found
+    if (user) {
+      req.user = user;
+    }
+  } catch (error) {
+    // Log verification errors but continue as guest
+    if (error instanceof Error) {
+      console.error(`Authentication error: ${error.message}`);
+    }
+  } finally {
+    // 7. Always continue to next middleware
+    next();
   }
 };

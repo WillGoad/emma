@@ -2,6 +2,7 @@ import {
   ListFilter,
   MoreHorizontal,
   PlusCircle,
+  RefreshCcw,
   Search,
 } from "lucide-react";
 import Link from "next/link";
@@ -36,6 +37,7 @@ import { Input } from "@/components/ui/input";
 import { useState } from "react";
 import { formatDate } from "@/lib/utils";
 import { PricingMode } from "@/lib/types";
+import { populateKongDB } from "@/lib/api/api-utils";
 
 type DataProductsTableProps = {
   dataProducts: any[] | undefined;
@@ -109,6 +111,18 @@ const DataProductsTable = ({ dataProducts }: DataProductsTableProps) => {
                 </span>
               </Button>
             </Link>
+            <Button
+              size="sm"
+              className="h-8 gap-1"
+              onClick={async () => {
+                await populateKongDB();
+              }}
+            >
+              <RefreshCcw className="h-3.5 w-3.5" />
+              <span className="sr-only sm:not-sr-only sm:whitespace-nowrap">
+                Sync Kong Database
+              </span>
+            </Button>
           </div>
         </div>
         <div className="mt-2 max-w-full w-full">

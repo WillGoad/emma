@@ -1,5 +1,6 @@
 "use client";
 
+//Convert to client component
 import { useState } from "react";
 
 import { useRouter } from "next/navigation";
@@ -16,33 +17,40 @@ import {
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-// import { AccountIndicator } from "@/components/ui/account-indicator";
 
-import { setUserCookies } from "@/lib/utils";
 import { useToast } from "@/components/hooks/use-toast";
+import { setUserCookies } from "@/lib/utils";
 import { mutate } from "swr";
+import { useEffect } from "react";
+import { useSearchParams } from "next/navigation";
 
-export default function Signin() {
-  // const params = useSearchParams();
+export default function ResetPassword() {
+  const searchParams = useSearchParams();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [resetToken, setResetToken] = useState("");
   const [code, setCode] = useState("");
-  const [currentTab, setCurrentTab] = useState("email"); //["email", "confirmation"]
+  const [currentTab, setCurrentTab] = useState("email");
   const router = useRouter();
   const { toast } = useToast();
 
-  const onLogin = async () => {
+  useEffect(() => {
+    const token = searchParams.get("token");
+    if (token) {
+      setResetToken(token);
+    }
+  }, []);
+
+  const onReset = async () => {
     try {
-      const response = await fetch(
-        `${process.env.NEXT_PUBLIC_API_URL}/user/auth/login`,
-        {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify({ email, password }),
-        }
-      );
+      const apiUrl = process.env.NEXT_PUBLIC_API_URL;
+      const response = await fetch(`${apiUrl}/user/auth/reset-password`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ email, password, resetToken }),
+      });
       //If status code 200 then change tab
       if (response.status === 200) {
         toast({
@@ -64,21 +72,19 @@ export default function Signin() {
 
   const onVerifyAccount = async () => {
     try {
-      const response = await fetch(
-        `${process.env.NEXT_PUBLIC_API_URL}/user/auth/verify`,
-        {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify({ code, email }),
-        }
-      );
-      // If status code 200 then change tab
+      const apiUrl = process.env.NEXT_PUBLIC_API_URL;
+      const response = await fetch(`${apiUrl}/user/auth/verify`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ code, email }),
+      });
+      //If status code 200 then change tab
       if (response.status === 200) {
         toast({
-          title: "Welcome back",
-          description: "You are now signed in.",
+          title: "Welcome back!",
+          description: "Your password has been reset and you are logged in.",
           duration: 5000,
         });
         const data = await response.json();
@@ -88,7 +94,7 @@ export default function Signin() {
       }
     } catch (error) {
       toast({
-        title: "Error signing in",
+        title: "Error verifying account",
         description: String(error),
         duration: 5000,
       });
@@ -96,20 +102,23 @@ export default function Signin() {
   };
 
   //Function for when the user clicks the send code button
-  const onSendCode = () => {
-    //Check email is valid
+  const onSendCode = (e: React.MouseEvent<HTMLButtonElement, MouseEvent>) => {
+    e.preventDefault();
     if (
       email.includes("@") &&
       email.includes(".") &&
       email.length > 5 &&
-      password.length >= 12
+      password.length >= 12 &&
+      resetToken.length > 0
     ) {
-      onLogin();
+      console.log("Sending code");
+      onReset();
     }
   };
 
   //Function for when user clicks submit Code button
-  const onSubmitCode = () => {
+  const onSubmitCode = (e: React.MouseEvent<HTMLButtonElement, MouseEvent>) => {
+    e.preventDefault();
     if (
       code.length === 6 &&
       email.includes("@") &&
@@ -122,14 +131,14 @@ export default function Signin() {
 
   return (
     <div className="flex flex-col items-center justify-center min-h-screen py-2">
-      <main className="flex flex-col items-center justify-center w-full flex-1 px-20 text-center gap-4">
+      <main className="flex flex-col items-center justify-center w-full flex-1 px-20 text-center  gap-4">
         <Button
           asChild={true}
           variant="outline"
           role="combobox"
           className="w-[120px] justify-center gap-5"
         >
-          <Link href="/onboarding">Sign up</Link>
+          <Link href="/login">Log in</Link>
         </Button>
         <Tabs
           activationMode="automatic"
@@ -138,7 +147,7 @@ export default function Signin() {
         >
           <TabsList className="grid w-full grid-cols-2">
             <TabsTrigger onClick={() => setCurrentTab("email")} value="email">
-              Email
+              Reset Password
             </TabsTrigger>
             <TabsTrigger
               onClick={() => setCurrentTab("confirmation")}
@@ -151,13 +160,23 @@ export default function Signin() {
             <Card>
               <CardHeader>
                 <CardDescription>
-                  Enter the email associated with your account. We&apos;ll send
-                  you a code to confirm it&apos;s you.
+                  Enter the email you use with your account. We&apos;ll send you
+                  a code to confirm it&apos;s you.
                 </CardDescription>
               </CardHeader>
-              <form onSubmit={(e) => e.preventDefault()}>
+              <form>
                 <CardContent className="space-y-2">
-                  <div className="space-y-1">
+                  <div className="flex flex-col gap-6">
+                    <div className="flex flex-col gap-2 items-start">
+                      <Label className="pl-2" htmlFor="resetToken">
+                        Reset Token
+                      </Label>
+                      <Input
+                        id="resetToken"
+                        value={resetToken}
+                        onChange={(e) => setResetToken(e.target.value)}
+                      />
+                    </div>
                     <div className="flex flex-col gap-2 items-start">
                       <Label className="pl-2" htmlFor="email">
                         Email
@@ -170,7 +189,7 @@ export default function Signin() {
                     </div>
                     <div className="flex flex-col gap-2 items-start">
                       <Label className="pl-2" htmlFor="password">
-                        Password
+                        New Password
                       </Label>
                       <Input
                         id="password"
@@ -182,7 +201,9 @@ export default function Signin() {
                   </div>
                 </CardContent>
                 <CardFooter>
-                  <Button onClick={onSendCode}>Send Code</Button>
+                  <Button type="submit" onClick={onSendCode}>
+                    Send Code
+                  </Button>
                 </CardFooter>
               </form>
             </Card>
@@ -195,12 +216,7 @@ export default function Signin() {
                   spam folder.
                 </CardDescription>
               </CardHeader>
-              <form
-                onSubmit={(e) => {
-                  e.preventDefault();
-                  onSubmitCode();
-                }}
-              >
+              <form>
                 <CardContent className="space-y-2">
                   <div className="flex flex-col gap-6">
                     <div className="flex flex-col gap-2 items-start">
@@ -226,7 +242,9 @@ export default function Signin() {
                   </div>
                 </CardContent>
                 <CardFooter>
-                  <Button type="submit">Submit</Button>
+                  <Button type="submit" onClick={onSubmitCode}>
+                    Submit
+                  </Button>
                 </CardFooter>
               </form>
             </Card>

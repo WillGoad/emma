@@ -7,6 +7,8 @@ import { SidebarNav } from "@/components/sidebar-nav/sidebar-nav";
 import { useEffect, useState } from "react";
 import { DataBuyerSettingsTab } from "@/lib/types";
 import { CredentialsForm } from "../forms/credentials-form";
+import { Account } from "../forms/account";
+import { Billing } from "../forms/billing";
 
 export const metadata: Metadata = {
   title: "Emma Data",
@@ -16,7 +18,7 @@ export const metadata: Metadata = {
 export const DataBuyerSettings = () => {
   const searchParams = useSearchParams();
   const [currentTab, setCurrentTab] = useState<DataBuyerSettingsTab>(
-    DataBuyerSettingsTab.ACCOUNT,
+    DataBuyerSettingsTab.ACCOUNT
   );
 
   const sidebarNavItems = [
@@ -90,7 +92,11 @@ export const DataBuyerSettings = () => {
                 </p>
               </div>
               <Separator />
-              <CredentialsForm />
+              {currentTab === DataBuyerSettingsTab.CREDENTIALS && (
+                <CredentialsForm />
+              )}
+              {currentTab === DataBuyerSettingsTab.ACCOUNT && <Account />}
+              {currentTab === DataBuyerSettingsTab.BILLING && <Billing />}
             </div>
           </div>
         </div>

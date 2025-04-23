@@ -11,13 +11,13 @@ export const userFetcher = async () => {
       {
         method: "POST",
         headers: {
-          "x-access-token": accessToken,
+          Authorization: `Bearer ${accessToken}`,
           "Content-Type": "application/json",
         },
       }
     );
     const data = await response.json();
-    return data?.role ? data : { role: UserRole.GUEST };
+    return data;
   } catch (error) {
     return { role: UserRole.GUEST };
   }
@@ -26,19 +26,17 @@ export const userFetcher = async () => {
 export const accessibleFetcher = async () => {
   try {
     const accessToken = await getCookie(USER_TOKEN);
-    const headers: Record<string, string> = {
-      "Content-Type": "application/json",
-    };
-
-    if (accessToken) {
-      headers["x-access-token"] = accessToken;
-    }
 
     const response = await fetch(
-      `${process.env.NEXT_PUBLIC_API_URL}/dashboard/get-dashboard-data`,
+      `${process.env.NEXT_PUBLIC_API_URL}/user/get-dashboard-data`,
       {
         method: "GET",
-        headers,
+        headers: accessToken ? {
+          Authorization: `Bearer ${accessToken}`,
+          "Content-Type": "application/json",
+        } : {
+          "Content-Type": "application/json",
+        }
       }
     );
     if (!response.ok) {

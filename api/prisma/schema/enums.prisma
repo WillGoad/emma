@@ -285,6 +285,7 @@ enum UserRole {
   ADMIN
   DATA_BUYER
   DATA_PRODUCER
+  GUEST
 }
 
 enum DataProductStatus {

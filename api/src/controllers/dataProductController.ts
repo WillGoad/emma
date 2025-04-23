@@ -1,10 +1,11 @@
 import { Request, Response } from "express";
 import { prisma } from "..";
-import dotenv from "dotenv";
+import "dotenv/config";
 import {
   AuthenticatedRequest,
   DataProductWithOrganization,
   MappedDataProduct,
+  PrivateDataProductWithOrganization,
 } from "../utils/types";
 import {
   DataProductStatus,
@@ -13,13 +14,12 @@ import {
 } from "@prisma/client";
 import {
   addAllUsersToProductACL,
-  createKongServiceForProduct,
-  deleteKongServiceByID,
+  addServiceAclPlugin,
+  addSomeUsersToProductACL,
+  manageKongService,
   upsertKongService,
 } from "../utils/kong";
 import { isValidCurrency } from "../utils/validation";
-
-dotenv.config();
 
 export const getDataProducts = async (
   req: Request,
@@ -78,19 +78,8 @@ export const createDataProduct = async (
 ): Promise<void> => {
   try {
     // Authorization check
-    if (!req.userId) {
+    if (req.user.role !== UserRole.ADMIN) {
       res.status(401).json({ message: "Unauthorized" });
-      return;
-    }
-
-    // Permission validation
-    const currentUser = await prisma.user.findUnique({
-      where: { id: req.userId },
-      select: { role: true },
-    });
-
-    if (currentUser?.role !== UserRole.ADMIN) {
-      res.status(403).json({ message: "Insufficient permissions" });
       return;
     }
 
@@ -194,30 +183,20 @@ export const createDataProduct = async (
     // Kong integration with error handling
     let kongServiceId: string | undefined;
     try {
-      const result = await createKongServiceForProduct({ product: newProduct });
-      kongServiceId = result.service.id;
-      await prisma.dataProduct.update({
-        where: { id: newProduct.id },
-        data: { kongServiceID: result.service.id },
-      });
+      const { service } = await upsertKongService(newProduct);
+      await addServiceAclPlugin(
+        {
+          name: "acl",
+          config: { whitelist: [`data_product_${newProduct.id}_group`] },
+        },
+        service.id
+      );
+      kongServiceId = service.id;
     } catch (kongError) {
-      // Check if the Kong service was created
-      if (kongServiceId) {
-        try {
-          // Delete the Kong service if it exists
-          await deleteKongServiceByID(kongServiceId);
-        } catch (deleteError) {
-          console.error("Failed to cleanup Kong service:", deleteError);
-          // Optionally re-throw or handle as needed
-        }
-      }
-
-      // Delete the product from the database
+      if (kongServiceId) await manageKongService("DELETE", kongServiceId);
       await prisma.dataProduct.delete({
         where: { id: newProduct.id },
       });
-
-      // Propagate the error
       throw new Error("Failed to configure API gateway");
     }
 
@@ -237,20 +216,8 @@ export const updateDataProduct = async (
   res: Response
 ): Promise<void> => {
   try {
-    // Authorization check
-    if (!req.userId) {
+    if (req.user.role !== UserRole.ADMIN) {
       res.status(401).json({ message: "Unauthorized" });
-      return;
-    }
-
-    // Permission validation
-    const currentUser = await prisma.user.findUnique({
-      where: { id: req.userId },
-      select: { role: true },
-    });
-
-    if (currentUser?.role !== UserRole.ADMIN) {
-      res.status(403).json({ message: "Insufficient permissions" });
       return;
     }
 
@@ -273,12 +240,18 @@ export const updateDataProduct = async (
     }
 
     // Validate enum values if provided
-    if (updates.status && !Object.values(DataProductStatus).includes(updates.status)) {
+    if (
+      updates.status &&
+      !Object.values(DataProductStatus).includes(updates.status)
+    ) {
       res.status(400).json({ message: "Invalid status value" });
       return;
     }
 
-    if (updates.pricingMode && !Object.values(PriceStructureMode).includes(updates.pricingMode)) {
+    if (
+      updates.pricingMode &&
+      !Object.values(PriceStructureMode).includes(updates.pricingMode)
+    ) {
       res.status(400).json({ message: "Invalid pricing mode" });
       return;
     }
@@ -304,8 +277,13 @@ export const updateDataProduct = async (
         updates.paymentInterval = null;
       } else {
         // Validate pricing structure for non-free modes
-        if (updates.pricingMode === PriceStructureMode.SUBSCRIPTION && !updates.paymentInterval) {
-          res.status(400).json({ message: "Payment interval required for subscriptions" });
+        if (
+          updates.pricingMode === PriceStructureMode.SUBSCRIPTION &&
+          !updates.paymentInterval
+        ) {
+          res
+            .status(400)
+            .json({ message: "Payment interval required for subscriptions" });
           return;
         }
 
@@ -326,7 +304,7 @@ export const updateDataProduct = async (
     }
 
     // Update the data product
-    let updatedProduct: DataProductWithOrganization;
+    let updatedProduct: PrivateDataProductWithOrganization;
 
     // Kong integration with error handling
     try {
@@ -335,27 +313,119 @@ export const updateDataProduct = async (
         data: updates,
         include: { organisation: true },
       });
-      await upsertKongService(updatedProduct);
+      const { service } = await upsertKongService(updatedProduct);
+      await addServiceAclPlugin(
+        {
+          name: "acl",
+          config: { whitelist: [`data_product_${id}_group`] },
+        },
+        service.id
+      );
     } catch (kongError) {
-      console.error("Kong service update failed:", kongError);
       // Revert the product update if Kong fails
       await prisma.dataProduct.update({
         where: { id },
         data: existingProduct,
       });
-      
+
       throw new Error("Failed to update API gateway configuration");
     }
 
     await addAllUsersToProductACL(updatedProduct.id);
 
-    res.status(200).json({ message: "Data product updated successfully", data: updatedProduct });
+    res.status(200).json({
+      message: "Data product updated successfully",
+      data: updatedProduct,
+    });
   } catch (error) {
     console.error("Data product update error:", error);
     const message = error instanceof Error ? error.message : "Update failed";
-    const statusCode = message.includes("permission") ? 403 
-                     : message.includes("not found") ? 404 
-                     : 500;
+    const statusCode = message.includes("permission")
+      ? 403
+      : message.includes("not found")
+        ? 404
+        : 500;
     res.status(statusCode).json({ message });
+  }
+};
+
+export const recreateKongServices = async (
+  req: AuthenticatedRequest,
+  res: Response
+): Promise<void> => {
+  try {
+    if (req.user.role !== UserRole.ADMIN) {
+      res.status(401).json({ message: "Unauthorized" });
+      return;
+    }
+    // Step 1: Delete all existing services except admin-api
+    const allServices = await manageKongService("GET");
+    const { KONG_ADMIN_API_SERVICE_ID } = process.env;
+
+    if (!KONG_ADMIN_API_SERVICE_ID) {
+      throw new Error("KONG_ADMIN_API_SERVICE_ID is not defined");
+    }
+
+    const nonAdminServiceIDs = allServices.data
+      .filter((service: any) => service.id !== KONG_ADMIN_API_SERVICE_ID)
+      .map((service: any) => service.id);
+
+    for (let i = 0; i < nonAdminServiceIDs.length; i++) {
+      await manageKongService("DELETE", nonAdminServiceIDs[i]);
+    }
+
+    // Step 2: Get all data products with organization info
+    const dataProducts = await prisma.dataProduct.findMany({
+      where: {
+        status: {
+          in: [DataProductStatus.LIVE, DataProductStatus.DRAFT],
+          not: DataProductStatus.ARCHIVED,
+        },
+      },
+      include: {
+        organisation: {
+          select: {
+            name: true,
+            logoUrl: true,
+            shortName: true,
+          },
+        },
+        Subscriptions: {
+          select: {
+            user: {
+              select: {
+                id: true,
+                email: true,
+              },
+            },
+          },
+        },
+      },
+    });
+
+    // Step 3: Recreate services for each data product
+    for (const product of dataProducts) {
+      const { service } = await upsertKongService(product);
+
+      if (product.pricingMode !== "FREE") {
+        await addServiceAclPlugin(
+          {
+            name: "acl",
+            config: { whitelist: [`data_product_${product.id}_group`] },
+          },
+          service.id
+        );
+
+        const subscriberIds = product.Subscriptions.map((sub) => sub.user.id);
+
+        await addSomeUsersToProductACL(product.id, subscriberIds);
+      }
+    }
+
+    res
+      .status(200)
+      .json({ success: true, message: "Kong services successfully recreated" });
+  } catch (error: any) {
+    throw new Error("Service recreation failed.");
   }
 };

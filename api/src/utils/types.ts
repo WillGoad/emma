@@ -1,8 +1,15 @@
 import { Prisma } from "@prisma/client";
 import { Request } from "express";
 
+type PrismaUser = Prisma.UserGetPayload<{}>;
+
+// 2. Create a discriminated union type
+type AuthUser =
+  | ({ role: Exclude<PrismaUser['role'], 'GUEST'> } & PrismaUser) // Authenticated case
+  | { role: 'GUEST' }; // Guest case
+
 export interface AuthenticatedRequest extends Request {
-  userId?: string;
+  user: AuthUser;
 }
 
 export interface EmmaJWTPayload {
@@ -42,6 +49,27 @@ export type Organisation = Prisma.OrganisationGetPayload<{
   select: { id: true; logoUrl: true; name: true };
 }>;
 
+export type PrivateDataProductWithOrganization = Prisma.DataProductGetPayload<{
+  select: {
+    id: true;
+    name: true;
+    description: true;
+    accessURL: true;
+    kongServiceID: true;
+    status: true;
+    upstreamURL: true;
+    price: true;
+    organisationID: true;
+    organisation: {
+      select: {
+        name: true;
+        logoUrl: true;
+        shortName: true;
+      };
+    };
+  };
+}>;
+
 export type DataProductWithOrganization = Prisma.DataProductGetPayload<{
   select: {
     id: true;
@@ -68,3 +96,9 @@ export type MappedDataProduct = {
   organisationLogoUrl: string;
   organisationID: string;
 };
+
+export interface KeyAuth {
+  id: string;
+  key: string;
+  ttl: number;
+}
