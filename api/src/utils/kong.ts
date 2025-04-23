@@ -368,6 +368,39 @@ export const upsertKongService = async (
   }
 };
 
+interface PluginConfig {
+  name: string;
+  config: {
+    whitelist: string[];
+  };
+}
+
+export const addServiceAclPlugin = async (
+  pluginConfig: PluginConfig,
+  serviceId: string
+) => {
+  if (!checkCircuitBreaker()) return;
+
+  const { KONG_ADMIN_URL, KONG_HEADERS } = validateKongConfig();
+
+  if (!pluginConfig?.name || !pluginConfig?.config) {
+    throw new Error("Invalid plugin configuration");
+  }
+
+  if (!serviceId?.trim()) {
+    throw new Error("Service ID is required");
+  }
+
+  try {
+    const url = `${KONG_ADMIN_URL}/services/${serviceId}/plugins`;
+    return await axios.post(url, pluginConfig, { headers: KONG_HEADERS });
+  } catch (error) {
+    handleCircuitBreakerState(error);
+    handleKongError(error, "Failed to add ACL plugin");
+    throw error;
+  }
+};
+
 export const batchACLOperation = async (
   productId: string,
   operation: "add" | "remove"
@@ -405,8 +438,38 @@ export const batchACLOperation = async (
   }
 };
 
+const subsetACLOperation = async (
+  productId: string,
+  operation: "add" | "remove",
+  userIds: string[]
+) => {
+  try {
+    await Promise.allSettled(
+      userIds.map(async (userId) => {
+        try {
+          const consumer = await getOrCreateConsumer(userId);
+          await manageKongACL(
+            consumer.id,
+            `data_product_${productId}_group`,
+            operation === "add" ? "POST" : "DELETE"
+          );
+        } catch (error) {
+          console.error(`Failed ${operation} for user ${userId}:`, error);
+        }
+      })
+    );
+  } catch (error) {
+    throw handleKongError(error, `Batch ${operation} operation failed`);
+  }
+};
+
 export const addAllUsersToProductACL = (productId: string) =>
   batchACLOperation(productId, "add");
+
+export const addSomeUsersToProductACL = (
+  productId: string,
+  userIds: string[]
+) => subsetACLOperation(productId, "add", userIds);
 
 export const removeAllUsersFromProductACL = (productId: string) =>
   batchACLOperation(productId, "remove");

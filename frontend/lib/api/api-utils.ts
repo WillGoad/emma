@@ -4,7 +4,7 @@ import { USER_TOKEN } from "../constants";
 
 export const handleSubscribe = async (objectID: string) => {
   const token = await getCookie(USER_TOKEN);
-  if (!token) return;
+  if (!token) throw new Error("User not authenticated");
   const response = await fetch(
     `${process.env.NEXT_PUBLIC_API_URL}/user/subscribe-user-to-data-product`,
     {
@@ -27,7 +27,7 @@ export const handleSubscribe = async (objectID: string) => {
 
 export const handleUnsubscribe = async (objectID: string) => {
   const token = await getCookie(USER_TOKEN);
-  if (!token) return;
+  if (!token) throw new Error("User not authenticated");
   const response = await fetch(
     `${process.env.NEXT_PUBLIC_API_URL}/user/unsubscribe-user-from-data-product`,
     {
@@ -51,7 +51,7 @@ export const handleUnsubscribe = async (objectID: string) => {
 export const createAPIKey = async (ttl: number = 60 * 60 * 24 * 30) => {
   try {
     const accessToken = await getCookie(USER_TOKEN);
-    if (!accessToken) return;
+    if (!accessToken) throw new Error("User not authenticated");
     const response = await fetch(
       `${process.env.NEXT_PUBLIC_API_URL}/user/rotate-api-key`,
       {
@@ -82,7 +82,7 @@ export const createAPIKey = async (ttl: number = 60 * 60 * 24 * 30) => {
 export const revokeAPIKey = async (keyId: string) => {
   try {
     const accessToken = await getCookie(USER_TOKEN);
-    if (!accessToken) return;
+    if (!accessToken) throw new Error("User not authenticated");
     const response = await fetch(
       `${process.env.NEXT_PUBLIC_API_URL}/user/delete-api-key`,
       {
@@ -108,4 +108,24 @@ export const revokeAPIKey = async (keyId: string) => {
     console.error(error);
     return;
   }
+};
+
+export const populateKongDB = async () => {
+  const token = await getCookie(USER_TOKEN);
+  if (!token) throw new Error("User not authenticated");
+  const res = await fetch(
+    `${process.env.NEXT_PUBLIC_API_URL}/data-products/populate-kong-db`,
+    {
+      method: "GET",
+      headers: {
+        Authorization: `Bearer ${token}`,
+        "Content-Type": "application/json",
+      },
+    }
+  );
+  if (!res.ok) {
+    const message = await res.text();
+    throw new Error(`Failed to populate Kong DB: ${message}`);
+  }
+  return res.json();
 };

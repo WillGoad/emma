@@ -9,7 +9,6 @@ import { UserRole } from "@prisma/client";
 
 export const checkJwt = async (
   req: AuthenticatedRequest,
-  res: Response,
   next: NextFunction
 ) => {
   // Default to guest user
