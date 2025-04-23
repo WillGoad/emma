@@ -22,10 +22,8 @@ import { useToast } from "@/components/hooks/use-toast";
 import { setUserCookies } from "@/lib/utils";
 import { mutate } from "swr";
 import { useEffect } from "react";
-import { useSearchParams } from "next/navigation";
 
 export default function ResetPassword() {
-  const searchParams = useSearchParams();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [resetToken, setResetToken] = useState("");
@@ -35,7 +33,8 @@ export default function ResetPassword() {
   const { toast } = useToast();
 
   useEffect(() => {
-    const token = searchParams.get("token");
+    const params = new URLSearchParams(window.location.search);
+    const token = params.get("token");
     if (token) {
       setResetToken(token);
     }
