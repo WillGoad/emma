@@ -141,16 +141,42 @@ const manageKongACL = async (
   }
 };
 
+export const manageKongRoute = async (
+  method: "GET" | "POST" | "DELETE",
+  routeId?: string,
+  serviceId?: string
+) => {
+  const { KONG_ADMIN_URL, KONG_HEADERS } = validateKongConfig();
+  const baseUrl = serviceId
+    ? `${KONG_ADMIN_URL}/services/${serviceId}/routes`
+    : `${KONG_ADMIN_URL}/routes`;
+
+  const url = routeId ? `${baseUrl}/${routeId}` : baseUrl;
+
+  try {
+    switch (method) {
+      case "GET":
+        return (await axios.get(url, { headers: KONG_HEADERS })).data;
+      case "DELETE":
+        await axios.delete(url, { headers: KONG_HEADERS });
+        return true;
+      default:
+        throw new Error(`Unsupported method ${method} for route management`);
+    }
+  } catch (error) {
+    handleCircuitBreakerState(error);
+    handleKongError(error, "Kong admin API usage failed");
+    throw error;
+  }
+};
+
 export const manageKongService = async (
   method: "GET" | "POST" | "PATCH" | "DELETE",
   serviceId?: string,
   data?: any
 ) => {
   if (!checkCircuitBreaker()) return;
-  if (
-    !serviceId?.trim() &&
-    (method === "PATCH" || method === "DELETE" || method === "GET")
-  ) {
+  if (!serviceId?.trim() && (method === "PATCH" || method === "DELETE")) {
     throw new Error("Invalid service ID");
   }
   if ((method === "POST" || method === "PATCH") && !data) {
@@ -158,7 +184,7 @@ export const manageKongService = async (
   }
   const { KONG_ADMIN_URL, KONG_HEADERS } = validateKongConfig();
   const baseUrl = `${KONG_ADMIN_URL}/services`;
-  const url = serviceId ? `${baseUrl}/${serviceId}` : baseUrl;
+  const url = serviceId ? `${baseUrl}/${encodeURIComponent(serviceId)}` : baseUrl;
   try {
     switch (method) {
       case "GET":
@@ -168,12 +194,17 @@ export const manageKongService = async (
       case "PATCH":
         return (await axios.patch(url, data, { headers: KONG_HEADERS })).data;
       case "DELETE":
+        const routes = await manageKongRoute("GET", undefined, serviceId);
+        for (const route of routes.data) {
+          await manageKongRoute("DELETE", route.id);
+        }
         await axios.delete(url, { headers: KONG_HEADERS });
         return;
     }
   } catch (error) {
     handleCircuitBreakerState(error);
     handleKongError(error, "Kong admin API usage failed");
+    throw error;
   }
 };
 
@@ -283,7 +314,9 @@ export const removeUserFromProductACL = async (
   }
 };
 
-const getOrCreateConsumer = async (userId: string): Promise<KongConsumer> => {
+export const getOrCreateConsumer = async (
+  userId: string
+): Promise<KongConsumer> => {
   try {
     return await getConsumerById(userId);
   } catch (error) {
@@ -317,32 +350,54 @@ export const upsertKongService = async (
     );
 
     let service: KongServiceConfig;
+    let isNewService = false;
+
+    console.log("kongServiceID", product.kongServiceID);
     if (product.kongServiceID) {
-      const existingService = await manageKongService(
-        "GET",
-        product.kongServiceID
-      );
-      service = existingService
-        ? await manageKongService("PATCH", existingService.id, {
-            name: serviceName,
-            url: product.upstreamURL,
-            enabled: product.status === "LIVE",
-          })
-        : await manageKongService("POST", undefined, {
-            name: serviceName,
-            url: product.upstreamURL,
-            enabled: product.status === "LIVE",
-          });
+      let existingService;
+      try {
+        // Attempt to fetch existing service
+        existingService = await manageKongService("GET", product.kongServiceID);
+        console.log("Existing service:", existingService);
+      } catch (error) {
+        // Service not found: clear invalid ID and log
+        console.log("Existing service not found. Creating new service.");
+        existingService = null;
+      }
+
+      if (existingService) {
+        // Update existing service
+        service = await manageKongService("PATCH", existingService.id, {
+          name: serviceName,
+          url: product.upstreamURL,
+          enabled: product.status === "LIVE",
+        });
+      } else {
+        // Create new service (existing ID was invalid)
+        service = await manageKongService("POST", undefined, {
+          name: serviceName,
+          url: product.upstreamURL,
+          enabled: product.status === "LIVE",
+        });
+        isNewService = true;
+      }
     } else {
+      // Create new service (no existing ID)
       service = await manageKongService("POST", undefined, {
         name: serviceName,
         url: product.upstreamURL,
         enabled: product.status === "LIVE",
       });
+      isNewService = true;
     }
 
-    // Update Prisma if new service created
-    if (!product.kongServiceID) {
+    // Guard against invalid service creation
+    if (!service?.id) {
+      throw new Error("Failed to create/update service in Kong");
+    }
+
+    // Update Prisma if new service was created (new or replaced invalid ID)
+    if (isNewService) {
       await prisma.dataProduct.update({
         where: { id: product.id },
         data: { kongServiceID: service.id },
@@ -371,7 +426,7 @@ export const upsertKongService = async (
 interface PluginConfig {
   name: string;
   config: {
-    whitelist: string[];
+    allow: string[];
   };
 }
 
@@ -398,6 +453,27 @@ export const addServiceAclPlugin = async (
     handleCircuitBreakerState(error);
     handleKongError(error, "Failed to add ACL plugin");
     throw error;
+  }
+};
+
+export const removeExistingAclPlugins = async (serviceId: string) => {
+  try {
+    const { KONG_ADMIN_URL, KONG_HEADERS } = validateKongConfig();
+    const plugins = await axios.get(
+      `${KONG_ADMIN_URL}/services/${serviceId}/plugins`,
+      { headers: KONG_HEADERS }
+    );
+    
+    await Promise.all(
+      plugins.data.data
+        .filter((p: any) => p.name === "acl")
+        .map((p: any) => 
+          axios.delete(`${KONG_ADMIN_URL}/plugins/${p.id}`, 
+          { headers: KONG_HEADERS })
+        )
+    );
+  } catch (error) {
+    console.error("Plugin cleanup error:", error);
   }
 };
 

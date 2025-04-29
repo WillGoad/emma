@@ -16,6 +16,7 @@ import {
   addAllUsersToProductACL,
   addServiceAclPlugin,
   addSomeUsersToProductACL,
+  getOrCreateConsumer,
   manageKongService,
   upsertKongService,
 } from "../utils/kong";
@@ -187,7 +188,7 @@ export const createDataProduct = async (
       await addServiceAclPlugin(
         {
           name: "acl",
-          config: { whitelist: [`data_product_${newProduct.id}_group`] },
+          config: { allow: [`data_product_${newProduct.id}_group`] },
         },
         service.id
       );
@@ -317,7 +318,7 @@ export const updateDataProduct = async (
       await addServiceAclPlugin(
         {
           name: "acl",
-          config: { whitelist: [`data_product_${id}_group`] },
+          config: { allow: [`data_product_${id}_group`] },
         },
         service.id
       );
@@ -361,7 +362,7 @@ export const recreateKongServices = async (
     // Step 1: Delete all existing services except admin-api
     const allServices = await manageKongService("GET");
     const { KONG_ADMIN_API_SERVICE_ID } = process.env;
-
+    console.log(KONG_ADMIN_API_SERVICE_ID);
     if (!KONG_ADMIN_API_SERVICE_ID) {
       throw new Error("KONG_ADMIN_API_SERVICE_ID is not defined");
     }
@@ -369,9 +370,29 @@ export const recreateKongServices = async (
     const nonAdminServiceIDs = allServices.data
       .filter((service: any) => service.id !== KONG_ADMIN_API_SERVICE_ID)
       .map((service: any) => service.id);
-
+    console.log("nonAdminServiceIDs", nonAdminServiceIDs);
     for (let i = 0; i < nonAdminServiceIDs.length; i++) {
       await manageKongService("DELETE", nonAdminServiceIDs[i]);
+    }
+
+    // Create Consumer for each user
+
+    const BATCH_SIZE = 100;
+    let skip = 0;
+    while (true) {
+      const users = await prisma.user.findMany({
+        skip,
+        take: BATCH_SIZE,
+        select: { id: true },
+      });
+
+      if (users.length === 0) break;
+      console.log("Creating consumers for users", users.map(user => user.id));
+      await Promise.all(
+        users.map(user => getOrCreateConsumer(user.id).catch(console.error))
+      );
+
+      skip += BATCH_SIZE;
     }
 
     // Step 2: Get all data products with organization info
@@ -403,22 +424,39 @@ export const recreateKongServices = async (
       },
     });
 
+    console.log("dataProducts", dataProducts.map(product => product.name), dataProducts.map(product => product.id));
+
     // Step 3: Recreate services for each data product
     for (const product of dataProducts) {
       const { service } = await upsertKongService(product);
-
+      console.log("product.id", product.id);
+      console.log("service.id", service.id);
       if (product.pricingMode !== "FREE") {
+        try {
+        console.log("Adding ACL plugin for service:", service.id);
+        
         await addServiceAclPlugin(
           {
             name: "acl",
-            config: { whitelist: [`data_product_${product.id}_group`] },
+            config: { allow: [`data_product_${product.id}_group`] },
           },
           service.id
         );
 
         const subscriberIds = product.Subscriptions.map((sub) => sub.user.id);
-
+        console.log("Adding subscribers to ACL group:", {
+          product: product.id,
+          subscriberCount: subscriberIds.length
+        });
         await addSomeUsersToProductACL(product.id, subscriberIds);
+      } catch (error) {
+        console.error("Failed to configure paid product:", {
+          productId: product.id,
+          serviceId: service.id,
+          error: error
+        });
+        throw error;
+      }
       }
     }
 
@@ -426,6 +464,6 @@ export const recreateKongServices = async (
       .status(200)
       .json({ success: true, message: "Kong services successfully recreated" });
   } catch (error: any) {
-    throw new Error("Service recreation failed.");
+    throw new Error(error);
   }
 };
