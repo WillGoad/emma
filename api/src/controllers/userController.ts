@@ -380,7 +380,7 @@ export const rotateAPIKeyForUser = async (
   req: AuthenticatedRequest,
   res: Response
 ): Promise<KeyAuth | undefined> => {
-  if (!req.user || req.user.role !== UserRole.DATA_BUYER) {
+  if (!req.user || (req.user.role !== UserRole.DATA_BUYER && req.user.role !== UserRole.ADMIN)) {
     res.status(401).json({ message: "Unauthorized" });
     return;
   }
