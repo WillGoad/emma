@@ -8,7 +8,6 @@ import {
 } from "../controllers/dataProductController";
 import { checkJwt } from "../utils/middleware";
 
-// Route to index data products in algolia
 router.get("/get-count", getDataProducts);
 router.get("/populate-kong-db", checkJwt, recreateKongServices);
 

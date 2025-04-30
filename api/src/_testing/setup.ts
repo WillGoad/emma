@@ -1,4 +1,4 @@
-import { mockPrisma } from './__mocks__/prisma';
+import { mockPrisma } from '../__mocks__/prisma';
 
 
 // Mock node-cron to prevent real scheduling
